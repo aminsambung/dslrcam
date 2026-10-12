@@ -47,3 +47,17 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
+
+dependencies {
+    // ... dependency Tahap 1 ...
+
+    // CameraX
+    val cameraxVersion = "1.3.4"
+    implementation("androidx.camera:camera-core:$cameraxVersion")
+    implementation("androidx.camera:camera-camera2:$cameraxVersion")
+    implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
+    implementation("androidx.camera:camera-view:$cameraxVersion")
+
+    // Permission
+    implementation("com.google.accompanist:accompanist-permissions:0.34.0")
+}
