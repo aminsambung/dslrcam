@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">DSLRCam</string>
+
+    <string name="nav_camera">Kamera</string>
+    <string name="nav_gallery">Galeri</string>
+    <string name="nav_settings">Pengaturan</string>
+
+    <string name="camera_placeholder">Preview kamera akan muncul di sini</string>
+    <string name="gallery_placeholder">Belum ada foto</string>
+    <string name="settings_placeholder">Pengaturan akan datang</string>
+</resources>
