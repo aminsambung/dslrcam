@@ -25,6 +25,7 @@ class CameraController(private val context: Context) {
     private var imageCapture: ImageCapture? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var isReady = false
+    private var currentSettings: ManualSettings = ManualSettings()
 
     fun startCamera(
         lifecycleOwner: LifecycleOwner,
@@ -43,9 +44,7 @@ class CameraController(private val context: Context) {
                     it.setSurfaceProvider(previewView.surfaceProvider)
                 }
 
-                imageCapture = ImageCapture.Builder()
-                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-                    .build()
+                rebuildImageCapture()
 
                 val selector = CameraSelector.DEFAULT_BACK_CAMERA
 
@@ -68,6 +67,21 @@ class CameraController(private val context: Context) {
         }, ContextCompat.getMainExecutor(context))
     }
 
+    private fun rebuildImageCapture() {
+        val builder = ImageCapture.Builder()
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+
+        imageCapture = ManualControls.applyToCapture(builder, currentSettings).build()
+    }
+
+    fun updateManualSettings(settings: ManualSettings) {
+        currentSettings = settings
+        if (isReady) {
+            rebuildImageCapture()
+        }
+        Log.d(TAG, "Manual settings updated: $settings")
+    }
+
     fun takePhoto(onSaved: (Uri) -> Unit, onError: (Throwable) -> Unit) {
         val capture = imageCapture
 
@@ -78,7 +92,6 @@ class CameraController(private val context: Context) {
             return
         }
 
-        // File temporary di folder internal
         val dir = File(context.cacheDir, "photos").also { it.mkdirs() }
 
         val name = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
@@ -93,12 +106,8 @@ class CameraController(private val context: Context) {
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                     Log.d(TAG, "Temp tersimpan: ${tempFile.absolutePath}")
-
-                    // Pindah ke MediaStore
                     val uri = MediaStoreHelper.saveToGallery(context, tempFile)
-
                     if (uri != null) {
-                        Log.d(TAG, "MediaStore URI: $uri")
                         onSaved(uri)
                     } else {
                         onError(IllegalStateException("Gagal simpan ke MediaStore"))
