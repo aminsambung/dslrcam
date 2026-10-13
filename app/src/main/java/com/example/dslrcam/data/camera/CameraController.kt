@@ -24,6 +24,8 @@ class CameraController(private val context: Context) {
 
     private var imageCapture: ImageCapture? = null
     private var cameraProvider: ProcessCameraProvider? = null
+    private var lifecycleOwner: LifecycleOwner? = null
+    private var previewView: PreviewView? = null
     private var isReady = false
     private var currentSettings: ManualSettings = ManualSettings()
 
@@ -33,6 +35,10 @@ class CameraController(private val context: Context) {
         onReady: () -> Unit,
         onError: (Throwable) -> Unit
     ) {
+        // Simpan reference untuk rebind nanti
+        this.lifecycleOwner = lifecycleOwner
+        this.previewView = previewView
+
         val future = ProcessCameraProvider.getInstance(context)
 
         future.addListener({
@@ -40,21 +46,7 @@ class CameraController(private val context: Context) {
                 val provider = future.get()
                 cameraProvider = provider
 
-                val preview = Preview.Builder().build().also {
-                    it.setSurfaceProvider(previewView.surfaceProvider)
-                }
-
-                rebuildImageCapture()
-
-                val selector = CameraSelector.DEFAULT_BACK_CAMERA
-
-                provider.unbindAll()
-                provider.bindToLifecycle(
-                    lifecycleOwner,
-                    selector,
-                    preview,
-                    imageCapture
-                )
+                bindAll()
 
                 isReady = true
                 Log.d(TAG, "Camera ready")
@@ -67,18 +59,49 @@ class CameraController(private val context: Context) {
         }, ContextCompat.getMainExecutor(context))
     }
 
-    private fun rebuildImageCapture() {
+    /**
+     * Bind ulang Preview + ImageCapture ke lifecycle.
+     * Dipanggil saat start & saat ganti setting manual.
+     */
+    private fun bindAll() {
+        val provider = cameraProvider ?: return
+        val owner = lifecycleOwner ?: return
+        val pv = previewView ?: return
+
+        val preview = Preview.Builder().build().also {
+            it.setSurfaceProvider(pv.surfaceProvider)
+        }
+
         val builder = ImageCapture.Builder()
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
 
         imageCapture = ManualControls.applyToCapture(builder, currentSettings).build()
+
+        val selector = CameraSelector.DEFAULT_BACK_CAMERA
+
+        provider.unbindAll()
+        provider.bindToLifecycle(
+            owner,
+            selector,
+            preview,
+            imageCapture
+        )
+
+        Log.d(TAG, "Bound camera with settings: $currentSettings")
     }
 
     fun updateManualSettings(settings: ManualSettings) {
         currentSettings = settings
+
         if (isReady) {
-            rebuildImageCapture()
+            // Rebind biar ImageCapture baru aktif
+            try {
+                bindAll()
+            } catch (e: Exception) {
+                Log.e(TAG, "rebind error", e)
+            }
         }
+
         Log.d(TAG, "Manual settings updated: $settings")
     }
 
