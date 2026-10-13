@@ -19,7 +19,7 @@ class CameraViewModel : ViewModel() {
     var manualModeEnabled by mutableStateOf(false)
         private set
 
-    var lastPhotoUri: Uri? = null
+    var lastPhotoUri by mutableStateOf<Uri?>(null)
         private set
 
     fun initController(context: Context) {
@@ -36,11 +36,6 @@ class CameraViewModel : ViewModel() {
 
     fun toggleManualMode() {
         manualModeEnabled = !manualModeEnabled
-        if (!manualModeEnabled) {
-            // Reset ke auto
-            manualSettings = ManualSettings()
-            controller?.updateManualSettings(manualSettings)
-        }
     }
 
     fun updateIso(iso: Int?) {
@@ -60,11 +55,6 @@ class CameraViewModel : ViewModel() {
 
     fun updateFocus(distance: Float?) {
         manualSettings = manualSettings.copy(focusDistance = distance)
-        controller?.updateManualSettings(manualSettings)
-    }
-
-    fun updateExposureCompensation(ev: Int?) {
-        manualSettings = manualSettings.copy(exposureCompensation = ev)
         controller?.updateManualSettings(manualSettings)
     }
 
