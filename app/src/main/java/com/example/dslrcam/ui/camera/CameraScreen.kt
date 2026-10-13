@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
@@ -23,13 +24,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -38,8 +39,11 @@ import coil.compose.AsyncImage
 import com.example.dslrcam.ui.camera.components.ManualPanel
 import com.example.dslrcam.ui.theme.Accent
 import com.example.dslrcam.ui.theme.BackgroundDark
+import com.example.dslrcam.ui.theme.SurfaceDark
 import com.example.dslrcam.ui.theme.TextPrimary
+import com.example.dslrcam.ui.theme.TextSecondary
 import com.example.dslrcam.utils.Permissions
+import com.example.dslrcam.utils.PhotoFilters
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -67,7 +71,7 @@ fun CameraScreen(
         viewModel.getController()
     }
 
-    // Auto-hide kotak fokus setelah 2 detik
+    // Auto-hide kotak fokus
     LaunchedEffect(viewModel.focusPoint) {
         if (viewModel.focusPoint != null) {
             delay(2000)
@@ -84,6 +88,7 @@ fun CameraScreen(
             }
     ) {
         if (cameraPermission.status.isGranted && controller != null) {
+            // PREVIEW
             AndroidView(
                 factory = { ctx ->
                     TextureView(ctx).apply {
@@ -91,16 +96,11 @@ fun CameraScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
-
                         controller.startCamera(
                             textureView = this,
                             onReady = {},
                             onError = { e ->
-                                Toast.makeText(
-                                    ctx,
-                                    "Kamera error: ${e.message}",
-                                    Toast.LENGTH_LONG
-                                ).show()
+                                Toast.makeText(ctx, "Kamera error: ${e.message}", Toast.LENGTH_LONG).show()
                             }
                         )
                     }
@@ -110,31 +110,22 @@ fun CameraScreen(
                     .pointerInput(Unit) {
                         detectTapGestures(
                             onTap = { offset ->
-                                // Tap = fokus + tutup panel manual
-                                if (viewModel.manualModeEnabled) {
-                                    viewModel.toggleManualMode()
-                                }
-                                viewModel.onTapFocus(
-                                    offset,
-                                    viewSize.first,
-                                    viewSize.second
-                                )
+                                // Tap layar -> tutup semua panel + focus
+                                if (viewModel.manualModeEnabled) viewModel.toggleManualMode()
+                                if (viewModel.filterPanelEnabled) viewModel.toggleFilterPanel()
+                                viewModel.onTapFocus(offset, viewSize.first, viewSize.second)
                             },
                             onLongPress = {
                                 if (viewModel.manualModeEnabled) {
                                     viewModel.resetManual()
-                                    Toast.makeText(
-                                        context,
-                                        "Manual direset ke Auto",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
+                                    Toast.makeText(context, "Manual direset ke Auto", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         )
                     }
             )
 
-            // Kotak fokus (kalau ada)
+            // Kotak fokus
             viewModel.focusPoint?.let { point ->
                 Box(
                     modifier = Modifier
@@ -147,7 +138,7 @@ fun CameraScreen(
                 )
             }
 
-            // TopBar
+            // TOP BAR
             Row(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
@@ -180,6 +171,7 @@ fun CameraScreen(
 
                 Spacer(Modifier.weight(1f))
 
+                // Tombol M (manual) — kanan atas
                 Text(
                     text = "M",
                     color = if (viewModel.manualModeEnabled) BackgroundDark else TextPrimary,
@@ -194,7 +186,7 @@ fun CameraScreen(
                 )
             }
 
-            // Panel manual
+            // PANEL MANUAL
             if (viewModel.manualModeEnabled) {
                 ManualPanel(
                     iso = viewModel.manualSettings.iso,
@@ -212,7 +204,21 @@ fun CameraScreen(
                 )
             }
 
-            // Tombol shutter
+            // PANEL FILTER — popup di tengah bawah
+            if (viewModel.filterPanelEnabled) {
+                FilterPopup(
+                    currentFilterId = viewModel.currentFilter.id,
+                    onSelect = { id ->
+                        viewModel.setFilter(id)
+                        viewModel.toggleFilterPanel()  // langsung tutup setelah pilih
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 140.dp)
+                )
+            }
+
+            // TOMBOL SHUTTER
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -223,25 +229,21 @@ fun CameraScreen(
                     .clickable {
                         controller.takePhoto(
                             onSaved = { uri ->
-                                viewModel.onPhotoSaved(uri)
+                                viewModel.applyFilterToUri(context, uri)
                                 Toast.makeText(
                                     context,
-                                    "Foto tersimpan ke Galeri",
+                                    "Foto (${viewModel.currentFilter.name})",
                                     Toast.LENGTH_SHORT
                                 ).show()
                             },
                             onError = { e ->
-                                Toast.makeText(
-                                    context,
-                                    "Gagal: ${e.message}",
-                                    Toast.LENGTH_LONG
-                                ).show()
+                                Toast.makeText(context, "Gagal: ${e.message}", Toast.LENGTH_LONG).show()
                             }
                         )
                     }
             )
 
-            // Thumbnail
+            // THUMBNAIL — kiri bawah
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
@@ -249,9 +251,7 @@ fun CameraScreen(
                     .size(56.dp)
                     .clip(CircleShape)
                     .background(Color(0x66000000))
-                    .clickable {
-                        openSystemGallery(context, viewModel.lastPhotoUri)
-                    },
+                    .clickable { openSystemGallery(context, viewModel.lastPhotoUri) },
                 contentAlignment = Alignment.Center
             ) {
                 val lastUri = viewModel.lastPhotoUri
@@ -260,9 +260,7 @@ fun CameraScreen(
                         model = lastUri,
                         contentDescription = "Foto terakhir",
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape)
+                        modifier = Modifier.fillMaxSize().clip(CircleShape)
                     )
                 } else {
                     Icon(
@@ -274,7 +272,28 @@ fun CameraScreen(
                 }
             }
 
-            // Tombol Pengaturan
+            // IKON FILTER (magic wand) — kanan bawah, sebelum settings
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 88.dp, bottom = 32.dp)
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (viewModel.filterPanelEnabled) Accent else Color(0xCC000000)
+                    )
+                    .clickable { viewModel.toggleFilterPanel() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.AutoFixHigh,
+                    contentDescription = "Filter",
+                    tint = if (viewModel.filterPanelEnabled) BackgroundDark else TextPrimary,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            // TOMBOL SETTINGS — kanan bawah
             IconButton(
                 onClick = onOpenSettings,
                 modifier = Modifier
@@ -294,10 +313,76 @@ fun CameraScreen(
                 color = TextPrimary,
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .clickable {
-                        cameraPermission.launchPermissionRequest()
-                    }
+                    .clickable { cameraPermission.launchPermissionRequest() }
             )
+        }
+    }
+}
+
+/**
+ * Popup filter — muncul di atas shutter.
+ * Grid 3 kolom dengan nama filter.
+ */
+@Composable
+private fun FilterPopup(
+    currentFilterId: String,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .background(SurfaceDark.copy(alpha = 0.95f), RoundedCornerShape(16.dp))
+            .padding(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "FILTER",
+            color = TextSecondary,
+            fontSize = 10.sp,
+            letterSpacing = 2.sp,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            PhotoFilters.ALL.forEach { filter ->
+                val selected = filter.id == currentFilterId
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .clickable { onSelect(filter.id) }
+                        .padding(4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (selected) Accent else Color(0x33FFFFFF)
+                            )
+                            .border(
+                                width = if (selected) 2.dp else 0.dp,
+                                color = if (selected) TextPrimary else Color.Transparent,
+                                shape = RoundedCornerShape(12.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = filter.name.take(2),
+                            color = if (selected) BackgroundDark else TextPrimary,
+                            fontSize = 14.sp,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = filter.name,
+                        color = if (selected) Accent else TextPrimary,
+                        fontSize = 10.sp
+                    )
+                }
+            }
         }
     }
 }
@@ -324,10 +409,6 @@ private fun openSystemGallery(context: Context, lastPhotoUri: Uri?) {
         }
         context.startActivity(intent)
     } catch (e: Exception) {
-        Toast.makeText(
-            context,
-            "Tidak ada aplikasi galeri terinstall",
-            Toast.LENGTH_SHORT
-        ).show()
+        Toast.makeText(context, "Tidak ada aplikasi galeri", Toast.LENGTH_SHORT).show()
     }
 }
