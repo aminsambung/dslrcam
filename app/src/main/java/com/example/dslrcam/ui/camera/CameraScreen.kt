@@ -1,6 +1,7 @@
 package com.example.dslrcam.ui.camera
 
 import android.view.ViewGroup
+import android.widget.Toast
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -16,7 +17,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
@@ -48,35 +48,44 @@ fun CameraScreen(
         }
     }
 
+    val controller = remember {
+        viewModel.initController(context)
+        viewModel.getController()
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(BackgroundDark)
     ) {
         if (cameraPermission.status.isGranted) {
-            LaunchedEffect(Unit) {
-                viewModel.initController(context)
+            if (controller != null) {
+                AndroidView(
+                    factory = { ctx ->
+                        PreviewView(ctx).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            scaleType = PreviewView.ScaleType.FILL_CENTER
+
+                            controller.startCamera(
+                                lifecycleOwner = lifecycleOwner,
+                                previewView = this,
+                                onReady = {},
+                                onError = { e ->
+                                    Toast.makeText(
+                                        ctx,
+                                        "Kamera error: ${e.message}",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
             }
-
-            AndroidView(
-                factory = { ctx ->
-                    PreviewView(ctx).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        scaleType = PreviewView.ScaleType.FILL_CENTER
-
-                        viewModel.getController()?.startCamera(
-                            lifecycleOwner = lifecycleOwner,
-                            previewView = this,
-                            onReady = {},
-                            onError = {}
-                        )
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
 
             // Tombol shutter
             Box(
@@ -87,16 +96,27 @@ fun CameraScreen(
                     .clip(CircleShape)
                     .background(Accent)
                     .clickable {
-                        viewModel.getController()?.takePhoto(
-                            onSaved = { file ->
-                                viewModel.onPhotoSaved(file)
+                        controller?.takePhoto(
+                            onSaved = { uri ->
+                                viewModel.onPhotoSaved(uri)
+                                Toast.makeText(
+                                    context,
+                                    "Foto tersimpan ke Galeri",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                             },
-                            onError = {}
+                            onError = { e ->
+                                Toast.makeText(
+                                    context,
+                                    "Gagal: ${e.message}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
                         )
                     }
             )
 
-            // Tombol Galeri (kiri bawah)
+            // Tombol Galeri
             IconButton(
                 onClick = onOpenGallery,
                 modifier = Modifier
@@ -110,7 +130,7 @@ fun CameraScreen(
                 )
             }
 
-            // Tombol Pengaturan (kanan bawah)
+            // Tombol Pengaturan
             IconButton(
                 onClick = onOpenSettings,
                 modifier = Modifier
@@ -126,9 +146,13 @@ fun CameraScreen(
 
         } else {
             Text(
-                text = "Izin kamera dibutuhkan",
+                text = "Izin kamera dibutuhkan.\nTekan untuk minta izin.",
                 color = TextPrimary,
-                modifier = Modifier.align(Alignment.Center)
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .clickable {
+                        cameraPermission.launchPermissionRequest()
+                    }
             )
         }
     }
