@@ -1,8 +1,8 @@
 package com.example.dslrcam.ui.camera
 
+import android.view.TextureView
 import android.view.ViewGroup
 import android.widget.Toast
-import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -23,7 +23,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -47,8 +46,6 @@ fun CameraScreen(
     viewModel: CameraViewModel = viewModel()
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-
     val cameraPermission = rememberPermissionState(Permissions.CAMERA)
 
     LaunchedEffect(Unit) {
@@ -67,54 +64,50 @@ fun CameraScreen(
             .fillMaxSize()
             .background(BackgroundDark)
     ) {
-        if (cameraPermission.status.isGranted) {
-            if (controller != null) {
-                AndroidView(
-                    factory = { ctx ->
-                        PreviewView(ctx).apply {
-                            layoutParams = ViewGroup.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT
-                            )
-                            scaleType = PreviewView.ScaleType.FILL_CENTER
+        if (cameraPermission.status.isGranted && controller != null) {
+            AndroidView(
+                factory = { ctx ->
+                    TextureView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
 
-                            controller.startCamera(
-                                lifecycleOwner = lifecycleOwner,
-                                previewView = this,
-                                onReady = {},
-                                onError = { e ->
+                        controller.startCamera(
+                            textureView = this,
+                            onReady = {},
+                            onError = { e ->
+                                Toast.makeText(
+                                    ctx,
+                                    "Kamera error: ${e.message}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        )
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onTap = {
+                                if (viewModel.manualModeEnabled) {
+                                    viewModel.toggleManualMode()
+                                }
+                            },
+                            onLongPress = {
+                                if (viewModel.manualModeEnabled) {
+                                    viewModel.resetManual()
                                     Toast.makeText(
-                                        ctx,
-                                        "Kamera error: ${e.message}",
-                                        Toast.LENGTH_LONG
+                                        context,
+                                        "Manual direset ke Auto",
+                                        Toast.LENGTH_SHORT
                                     ).show()
                                 }
-                            )
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onTap = {
-                                    if (viewModel.manualModeEnabled) {
-                                        viewModel.toggleManualMode()
-                                    }
-                                },
-                                onLongPress = {
-                                    if (viewModel.manualModeEnabled) {
-                                        viewModel.resetManual()
-                                        Toast.makeText(
-                                            context,
-                                            "Manual direset ke Auto",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                }
-                            )
-                        }
-                )
-            }
+                            }
+                        )
+                    }
+            )
 
             // TopBar
             Row(
@@ -159,9 +152,7 @@ fun CameraScreen(
                             RoundedCornerShape(20.dp)
                         )
                         .padding(horizontal = 14.dp, vertical = 8.dp)
-                        .clickable {
-                            viewModel.toggleManualMode()
-                        }
+                        .clickable { viewModel.toggleManualMode() }
                 )
             }
 
@@ -192,7 +183,7 @@ fun CameraScreen(
                     .clip(CircleShape)
                     .background(Accent)
                     .clickable {
-                        controller?.takePhoto(
+                        controller.takePhoto(
                             onSaved = { uri ->
                                 viewModel.onPhotoSaved(uri)
                                 Toast.makeText(
@@ -212,7 +203,7 @@ fun CameraScreen(
                     }
             )
 
-            // Tombol Galeri — dengan thumbnail foto terakhir
+            // Tombol Galeri — thumbnail
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
@@ -224,9 +215,7 @@ fun CameraScreen(
                 contentAlignment = Alignment.Center
             ) {
                 val lastUri = viewModel.lastPhotoUri
-
                 if (lastUri != null) {
-                    // Tampilkan thumbnail foto terakhir
                     AsyncImage(
                         model = lastUri,
                         contentDescription = "Foto terakhir",
@@ -236,7 +225,6 @@ fun CameraScreen(
                             .clip(CircleShape)
                     )
                 } else {
-                    // Belum ada foto — tampilkan ikon
                     Icon(
                         imageVector = Icons.Filled.PhotoLibrary,
                         contentDescription = "Galeri",
