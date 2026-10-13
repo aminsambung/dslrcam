@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.ViewModel
 import com.example.dslrcam.data.camera.Camera2Controller
 import com.example.dslrcam.data.camera.ManualSettings
@@ -22,6 +23,10 @@ class CameraViewModel : ViewModel() {
     var lastPhotoUri by mutableStateOf<Uri?>(null)
         private set
 
+    /** Posisi tap-to-focus dalam koordinat view */
+    var focusPoint by mutableStateOf<Offset?>(null)
+        private set
+
     fun initController(context: Context) {
         if (controller == null) {
             controller = Camera2Controller(context.applicationContext)
@@ -36,6 +41,15 @@ class CameraViewModel : ViewModel() {
 
     fun toggleManualMode() {
         manualModeEnabled = !manualModeEnabled
+    }
+
+    fun onTapFocus(offset: Offset, viewWidth: Int, viewHeight: Int) {
+        focusPoint = offset
+        controller?.tapToFocus(offset.x, offset.y, viewWidth, viewHeight)
+    }
+
+    fun clearFocusPoint() {
+        focusPoint = null
     }
 
     fun updateIso(iso: Int?) {
