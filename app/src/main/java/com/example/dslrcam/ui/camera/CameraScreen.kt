@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
@@ -28,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 import com.example.dslrcam.ui.camera.components.ManualPanel
 import com.example.dslrcam.ui.theme.Accent
 import com.example.dslrcam.ui.theme.BackgroundDark
@@ -95,13 +97,11 @@ fun CameraScreen(
                         .pointerInput(Unit) {
                             detectTapGestures(
                                 onTap = {
-                                    // Tap layar -> tutup panel (setting tetap aktif)
                                     if (viewModel.manualModeEnabled) {
                                         viewModel.toggleManualMode()
                                     }
                                 },
                                 onLongPress = {
-                                    // Long-press -> reset ke auto (opsional)
                                     if (viewModel.manualModeEnabled) {
                                         viewModel.resetManual()
                                         Toast.makeText(
@@ -124,8 +124,6 @@ fun CameraScreen(
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Info ISO/shutter/WB
-                // Tampil kalau manual aktif ATAU kalau ada setting yang aktif
                 val hasManualSetting = viewModel.manualSettings.iso != null ||
                         viewModel.manualSettings.shutterSpeedNs != null ||
                         viewModel.manualSettings.whiteBalanceK != null
@@ -151,7 +149,6 @@ fun CameraScreen(
 
                 Spacer(Modifier.weight(1f))
 
-                // Tombol M
                 Text(
                     text = "M",
                     color = if (viewModel.manualModeEnabled) BackgroundDark else TextPrimary,
@@ -215,18 +212,38 @@ fun CameraScreen(
                     }
             )
 
-            // Tombol Galeri
-            IconButton(
-                onClick = onOpenGallery,
+            // Tombol Galeri — dengan thumbnail foto terakhir
+            Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(24.dp)
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(Color(0x66000000))
+                    .clickable { onOpenGallery() },
+                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Filled.PhotoLibrary,
-                    contentDescription = "Galeri",
-                    tint = TextPrimary
-                )
+                val lastUri = viewModel.lastPhotoUri
+
+                if (lastUri != null) {
+                    // Tampilkan thumbnail foto terakhir
+                    AsyncImage(
+                        model = lastUri,
+                        contentDescription = "Foto terakhir",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                    )
+                } else {
+                    // Belum ada foto — tampilkan ikon
+                    Icon(
+                        imageVector = Icons.Filled.PhotoLibrary,
+                        contentDescription = "Galeri",
+                        tint = TextPrimary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
             }
 
             // Tombol Pengaturan
