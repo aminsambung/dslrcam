@@ -27,9 +27,13 @@ jobs:
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
+      # FIX: beri izin eksekusi ke gradlew
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
       # 1. BUILD DEBUG APK (siap install di HP)
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: sh gradlew assembleDebug --stacktrace
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
@@ -40,7 +44,7 @@ jobs:
 
       # 2. BUILD RELEASE APK (belum ditandatangani)
       - name: Build Release APK (Unsigned)
-        run: ./gradlew assembleRelease --stacktrace
+        run: sh gradlew assembleRelease --stacktrace
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
