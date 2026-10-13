@@ -1,6 +1,8 @@
 package com.example.dslrcam.ui.camera.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -11,7 +13,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -33,10 +36,11 @@ fun ManualPanel(
     onShutterChange: (Long?) -> Unit,
     onWhiteBalanceChange: (Int?) -> Unit,
     onFocusChange: (Float?) -> Unit,
-    onReset: () -> Unit
+    onReset: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .background(
                 SurfaceDark.copy(alpha = 0.95f),
@@ -64,7 +68,6 @@ fun ManualPanel(
             }
         }
 
-        // ISO
         SliderRow(
             label = "ISO",
             valueText = iso?.toString() ?: "Auto",
@@ -75,18 +78,16 @@ fun ManualPanel(
             onAuto = { onIsoChange(null) }
         )
 
-        // Shutter
         SliderRow(
             label = "Rana",
             valueText = shutterNs?.let { formatShutter(it) } ?: "Auto",
             value = (shutterNs ?: 8_000_000L).toFloat(),
-            range = 100_000f..1_000_000_000f,  // 1/10000s sampai 1s
+            range = 100_000f..1_000_000_000f,
             steps = 0,
             onChange = { onShutterChange(it.toLong()) },
             onAuto = { onShutterChange(null) }
         )
 
-        // White Balance
         SliderRow(
             label = "WB",
             valueText = whiteBalanceK?.let { "${it}K" } ?: "Auto",
@@ -97,7 +98,6 @@ fun ManualPanel(
             onAuto = { onWhiteBalanceChange(null) }
         )
 
-        // Focus
         SliderRow(
             label = "Fokus",
             valueText = focusDistance?.let { "%.2f".format(it) } ?: "Auto",
@@ -145,7 +145,11 @@ private fun SliderRow(
                 modifier = Modifier
                     .background(Color(0x33FFC107), RoundedCornerShape(4.dp))
                     .padding(horizontal = 8.dp, vertical = 2.dp)
-                    .clickableNoRipple { onAuto() }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onAuto
+                    )
             )
         }
         Slider(
@@ -164,13 +168,3 @@ private fun formatShutter(ns: Long): String {
     val denom = (1_000_000_000L / ns).toInt()
     return "1/$denom"
 }
-
-// Helper clickable tanpa ripple
-private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier =
-    this.then(
-        androidx.compose.foundation.clickable(
-            interactionSource = null,
-            indication = null,
-            onClick = onClick
-        )
-    )
