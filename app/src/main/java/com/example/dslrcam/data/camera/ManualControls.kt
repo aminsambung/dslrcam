@@ -1,130 +1,93 @@
 package com.example.dslrcam.data.camera
 
-import android.content.Context
-import android.net.Uri
-import android.util.Log
-import androidx.camera.core.CameraSelector
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.params.RggbChannelVector
+import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.LifecycleOwner
-import com.example.dslrcam.data.storage.MediaStoreHelper
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Locale
 
-class CameraController(private val context: Context) {
+data class ManualSettings(
+    val iso: Int? = null,
+    val shutterSpeedNs: Long? = null,
+    val whiteBalanceK: Int? = null,
+    val focusDistance: Float? = null,
+    val exposureCompensation: Int? = null
+)
 
-    companion object {
-        private const val TAG = "CameraController"
-    }
+object ManualControls {
 
-    private var imageCapture: ImageCapture? = null
-    private var cameraProvider: ProcessCameraProvider? = null
-    private var isReady = false
-    private var currentSettings: ManualSettings = ManualSettings()
+    fun applyToCapture(
+        imageCapture: ImageCapture.Builder,
+        settings: ManualSettings
+    ): ImageCapture.Builder {
+        val extender = Camera2Interop.Extender(imageCapture)
 
-    fun startCamera(
-        lifecycleOwner: LifecycleOwner,
-        previewView: PreviewView,
-        onReady: () -> Unit,
-        onError: (Throwable) -> Unit
-    ) {
-        val future = ProcessCameraProvider.getInstance(context)
-
-        future.addListener({
-            try {
-                val provider = future.get()
-                cameraProvider = provider
-
-                val preview = Preview.Builder().build().also {
-                    it.setSurfaceProvider(previewView.surfaceProvider)
-                }
-
-                rebuildImageCapture()
-
-                val selector = CameraSelector.DEFAULT_BACK_CAMERA
-
-                provider.unbindAll()
-                provider.bindToLifecycle(
-                    lifecycleOwner,
-                    selector,
-                    preview,
-                    imageCapture
-                )
-
-                isReady = true
-                Log.d(TAG, "Camera ready")
-                onReady()
-            } catch (e: Exception) {
-                Log.e(TAG, "startCamera error", e)
-                isReady = false
-                onError(e)
-            }
-        }, ContextCompat.getMainExecutor(context))
-    }
-
-    private fun rebuildImageCapture() {
-        val builder = ImageCapture.Builder()
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-
-        imageCapture = ManualControls.applyToCapture(builder, currentSettings).build()
-    }
-
-    fun updateManualSettings(settings: ManualSettings) {
-        currentSettings = settings
-        // Rebuild ImageCapture dengan setting baru (perlu rebind kalau sedang aktif)
-        if (isReady) {
-            rebuildImageCapture()
-        }
-        Log.d(TAG, "Manual settings updated: $settings")
-    }
-
-    fun takePhoto(onSaved: (Uri) -> Unit, onError: (Throwable) -> Unit) {
-        val capture = imageCapture
-
-        if (capture == null || !isReady) {
-            val err = IllegalStateException("Kamera belum siap")
-            Log.e(TAG, "takePhoto: $err")
-            onError(err)
-            return
+        settings.iso?.let { iso ->
+            extender.setCaptureRequestOption(
+                CaptureRequest.SENSOR_SENSITIVITY,
+                iso
+            )
         }
 
-        val dir = File(context.cacheDir, "photos").also { it.mkdirs() }
+        settings.shutterSpeedNs?.let { ns ->
+            extender.setCaptureRequestOption(
+                CaptureRequest.SENSOR_EXPOSURE_TIME,
+                ns
+            )
+        }
 
-        val name = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-            .format(System.currentTimeMillis())
-        val tempFile = File(dir, "DSLRCam_$name.jpg")
+        settings.whiteBalanceK?.let { k ->
+            extender.setCaptureRequestOption(
+                CaptureRequest.CONTROL_AWB_MODE,
+                CaptureRequest.CONTROL_AWB_MODE_OFF
+            )
+            val gains = kelvinToRgbGains(k)
+            extender.setCaptureRequestOption(
+                CaptureRequest.COLOR_CORRECTION_MODE,
+                CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY
+            )
+            extender.setCaptureRequestOption(
+                CaptureRequest.COLOR_CORRECTION_GAINS,
+                gains
+            )
+        }
 
-        val options = ImageCapture.OutputFileOptions.Builder(tempFile).build()
+        settings.focusDistance?.let { dist ->
+            extender.setCaptureRequestOption(
+                CaptureRequest.CONTROL_AF_MODE,
+                CaptureRequest.CONTROL_AF_MODE_OFF
+            )
+            extender.setCaptureRequestOption(
+                CaptureRequest.LENS_FOCUS_DISTANCE,
+                dist
+            )
+        }
 
-        capture.takePicture(
-            options,
-            ContextCompat.getMainExecutor(context),
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    Log.d(TAG, "Temp tersimpan: ${tempFile.absolutePath}")
-                    val uri = MediaStoreHelper.saveToGallery(context, tempFile)
-                    if (uri != null) {
-                        onSaved(uri)
-                    } else {
-                        onError(IllegalStateException("Gagal simpan ke MediaStore"))
-                    }
-                }
+        return imageCapture
+    }
 
-                override fun onError(exc: ImageCaptureException) {
-                    Log.e(TAG, "Gagal capture", exc)
-                    onError(exc)
-                }
-            }
+    private fun kelvinToRgbGains(kelvin: Int): RggbChannelVector {
+        val temp = kelvin / 100f
+
+        val red: Float
+        val green: Float
+        val blue: Float
+
+        if (temp <= 66) {
+            red = 1.0f
+            green = (99.4708025861 * Math.log(temp.toDouble()) - 161.1195681661).toFloat() / 255f
+            blue = if (temp <= 19) 0f
+            else ((138.5177312231 * Math.log((temp - 10).toDouble()) - 305.0447927307).toFloat() / 255f)
+        } else {
+            red = (329.698727446 * Math.pow((temp - 60).toDouble(), -0.1332047592)).toFloat() / 255f
+            green = (288.1221695283 * Math.pow((temp - 60).toDouble(), -0.0755148492)).toFloat() / 255f
+            blue = 1.0f
+        }
+
+        return RggbChannelVector(
+            red.coerceIn(0.5f, 3f),
+            green.coerceIn(0.5f, 3f),
+            blue.coerceIn(0.5f, 3f),
+            green.coerceIn(0.5f, 3f)
         )
-    }
-
-    fun shutdown() {
-        cameraProvider?.unbindAll()
-        isReady = false
     }
 }
