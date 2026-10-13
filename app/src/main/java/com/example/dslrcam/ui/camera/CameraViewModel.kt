@@ -33,6 +33,7 @@ class CameraViewModel : ViewModel() {
     var lastPhotoUri by mutableStateOf<Uri?>(null)
         private set
 
+    /** Posisi tap-to-focus dalam koordinat PIXEL (bukan dp) */
     var focusPoint by mutableStateOf<Offset?>(null)
         private set
 
@@ -62,9 +63,9 @@ class CameraViewModel : ViewModel() {
         currentFilter = PhotoFilters.findById(filterId)
     }
 
-    fun onTapFocus(offset: Offset, viewWidth: Int, viewHeight: Int) {
+    /** Simpan titik fokus dalam koordinat pixel */
+    fun setFocusPoint(offset: Offset) {
         focusPoint = offset
-        controller?.tapToFocus(offset.x, offset.y, viewWidth, viewHeight)
     }
 
     fun clearFocusPoint() {
@@ -96,19 +97,13 @@ class CameraViewModel : ViewModel() {
         controller?.updateManualSettings(manualSettings)
     }
 
-    /**
-     * Apply filter ke foto hasil capture.
-     * Dipanggil dari CameraScreen setelah takePhoto berhasil.
-     */
     fun applyFilterToUri(context: Context, uri: Uri) {
         try {
-            // Kalau Normal — langsung pakai
             if (currentFilter.matrix == null) {
                 onPhotoSaved(uri)
                 return
             }
 
-            // Baca isi uri ke file temporary
             val inputStream = context.contentResolver.openInputStream(uri)
             if (inputStream == null) {
                 onPhotoSaved(uri)
@@ -121,18 +116,14 @@ class CameraViewModel : ViewModel() {
             }
             inputStream.close()
 
-            // Apply filter
             val filteredFile = ImageProcessor.applyFilterToFile(tempFile, currentFilter)
 
             if (filteredFile != null && filteredFile.exists()) {
-                // Simpan ke MediaStore
                 val newUri = MediaStoreHelper.saveToGallery(context, filteredFile)
-
-                // Hapus file original dari MediaStore (opsional)
                 try {
                     context.contentResolver.delete(uri, null, null)
                 } catch (e: Exception) {
-                    // Abaikan kalau gagal hapus
+                    // ignore
                 }
 
                 if (newUri != null) {
