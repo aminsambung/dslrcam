@@ -81,6 +81,9 @@ dependencies {
     // Coil untuk load gambar di galeri
     implementation("io.coil-kt:coil-compose:2.7.0")
 
+    // EXIF reader untuk panel Info
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+  
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
