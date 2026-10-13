@@ -11,7 +11,6 @@ import android.net.Uri
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
-import android.util.Range
 import android.view.Surface
 import android.view.TextureView
 import com.example.dslrcam.data.storage.MediaStoreHelper
@@ -39,11 +38,14 @@ class Camera2Controller(private val context: Context) {
     private var previewSize: android.util.Size? = null
     private var currentSettings: ManualSettings = ManualSettings()
 
+    private var pendingSavedCallback: ((Uri) -> Unit)? = null
+    private var pendingErrorCallback: ((Throwable) -> Unit)? = null
+
     var isReady = false
         private set
 
     /**
-     * Inisialisasi kamera belakang.
+     * Panggil saat app dibuka. Buka kamera.
      */
     @SuppressLint("MissingPermission")
     fun startCamera(
@@ -52,9 +54,14 @@ class Camera2Controller(private val context: Context) {
         onError: (Throwable) -> Unit
     ) {
         try {
+            // Kalau sudah ready, tidak perlu buka lagi
+            if (isReady) {
+                onReady()
+                return
+            }
+
             cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
-            // Pilih kamera belakang
             cameraId = cameraManager!!.cameraIdList.firstOrNull { id ->
                 val chars = cameraManager!!.getCameraCharacteristics(id)
                 chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
@@ -71,21 +78,22 @@ class Camera2Controller(private val context: Context) {
 
             textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                 override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
-                    openCamera(st, w, h, onReady, onError)
+                    openCamera(st, onReady, onError)
                 }
 
                 override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
 
                 override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                    // PENTING: tutup kamera saat surface di-destroy
+                    closeCamera()
                     return true
                 }
 
                 override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
             }
 
-            // Kalau textureView sudah ready
             if (textureView.isAvailable) {
-                openCamera(textureView.surfaceTexture!!, textureView.width, textureView.height, onReady, onError)
+                openCamera(textureView.surfaceTexture!!, onReady, onError)
             }
 
         } catch (e: Exception) {
@@ -95,21 +103,25 @@ class Camera2Controller(private val context: Context) {
     }
 
     private fun startBackgroundThread() {
-        backgroundThread = HandlerThread("Camera2Background").also { it.start() }
-        backgroundHandler = Handler(backgroundThread!!.looper)
+        if (backgroundThread == null) {
+            backgroundThread = HandlerThread("Camera2Background").also { it.start() }
+            backgroundHandler = Handler(backgroundThread!!.looper)
+        }
     }
 
     @SuppressLint("MissingPermission")
     private fun openCamera(
         surfaceTexture: SurfaceTexture,
-        viewWidth: Int,
-        viewHeight: Int,
         onReady: () -> Unit,
         onError: (Throwable) -> Unit
     ) {
         try {
             val chars = characteristics ?: return
             val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return
+            val camId = cameraId ?: run {
+                onError(IllegalStateException("Camera ID null"))
+                return
+            }
 
             // Pilih ukuran preview
             val previewSizes = map.getOutputSizes(SurfaceTexture::class.java)
@@ -134,11 +146,23 @@ class Camera2Controller(private val context: Context) {
 
             imageReader!!.setOnImageAvailableListener({ reader ->
                 val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-                saveImage(image)
-                image.close()
+                try {
+                    val uri = saveImage(image)
+                    if (uri != null) {
+                        pendingSavedCallback?.invoke(uri)
+                    } else {
+                        pendingErrorCallback?.invoke(IllegalStateException("Gagal simpan"))
+                    }
+                } catch (e: Exception) {
+                    pendingErrorCallback?.invoke(e)
+                } finally {
+                    image.close()
+                    pendingSavedCallback = null
+                    pendingErrorCallback = null
+                }
             }, backgroundHandler)
 
-            cameraManager!!.openCamera(cameraId!!, object : CameraDevice.StateCallback() {
+            cameraManager!!.openCamera(camId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
                     cameraDevice = camera
                     createSession(onReady, onError)
@@ -147,11 +171,13 @@ class Camera2Controller(private val context: Context) {
                 override fun onDisconnected(camera: CameraDevice) {
                     camera.close()
                     cameraDevice = null
+                    isReady = false
                 }
 
                 override fun onError(camera: CameraDevice, error: Int) {
                     camera.close()
                     cameraDevice = null
+                    isReady = false
                     onError(IllegalStateException("Camera error: $error"))
                 }
             }, backgroundHandler)
@@ -174,7 +200,6 @@ class Camera2Controller(private val context: Context) {
                 override fun onConfigured(session: CameraCaptureSession) {
                     captureSession = session
                     try {
-                        // Preview request
                         val previewRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                             addTarget(preview)
                             applyManualSettings(this)
@@ -201,61 +226,48 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
-    /**
-     * Terapkan setting manual ke CaptureRequest.
-     */
     private fun applyManualSettings(builder: CaptureRequest.Builder) {
         val chars = characteristics ?: return
 
-        // ISO
-        currentSettings.iso?.let { iso ->
-            val range = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-            if (range != null && range.contains(iso)) {
-                builder.set(CaptureRequest.SENSOR_SENSITIVITY, iso)
+        // AE mode
+        if (currentSettings.iso != null || currentSettings.shutterSpeedNs != null) {
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+
+            currentSettings.iso?.let { iso ->
+                val range = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+                if (range != null && range.contains(iso)) {
+                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, iso)
+                }
             }
+
+            currentSettings.shutterSpeedNs?.let { ns ->
+                val range = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+                if (range != null && range.contains(ns)) {
+                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, ns)
+                }
+            }
+        } else {
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
         }
 
-        // Shutter
-        currentSettings.shutterSpeedNs?.let { ns ->
-            val range = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
-            if (range != null && range.contains(ns)) {
-                builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, ns)
-            }
-        }
-
-        // White balance
+        // WB
         currentSettings.whiteBalanceK?.let { k ->
             builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
             builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY)
             builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, kelvinToRggb(k))
+        } ?: run {
+            builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
         }
 
         // Focus
         currentSettings.focusDistance?.let { dist ->
             builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
             builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, dist)
-        }
-
-        // Kalau semua null, biarkan auto
-        if (currentSettings.iso == null && currentSettings.shutterSpeedNs == null) {
-            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-        } else {
-            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-        }
-
-        if (currentSettings.whiteBalanceK == null) {
-            builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
-        }
-
-        if (currentSettings.focusDistance == null) {
+        } ?: run {
             builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
         }
     }
 
-    /**
-     * Update setting manual — TIDAK perlu rebind.
-     * Cukup update repeating request.
-     */
     fun updateManualSettings(settings: ManualSettings) {
         currentSettings = settings
 
@@ -276,9 +288,6 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
-    /**
-     * Ambil foto — pakai TEMPLATE_STILL_CAPTURE.
-     */
     fun takePhoto(onSaved: (Uri) -> Unit, onError: (Throwable) -> Unit) {
         val device = cameraDevice
         val session = captureSession
@@ -289,6 +298,10 @@ class Camera2Controller(private val context: Context) {
             return
         }
 
+        // Simpan callback untuk dipanggil saat image ready
+        pendingSavedCallback = onSaved
+        pendingErrorCallback = onError
+
         try {
             val captureRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                 addTarget(reader.surface)
@@ -296,34 +309,18 @@ class Camera2Controller(private val context: Context) {
                 set(CaptureRequest.JPEG_ORIENTATION, 90)
             }
 
-            session.capture(captureRequest.build(), object : CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureCompleted(
-                    session: CameraCaptureSession,
-                    request: CaptureRequest,
-                    result: TotalCaptureResult
-                ) {
-                    Log.d(TAG, "Capture completed")
-                }
-
-                override fun onCaptureFailed(
-                    session: CameraCaptureSession,
-                    request: CaptureRequest,
-                    failure: CaptureFailure
-                ) {
-                    onError(IllegalStateException("Capture gagal: ${failure.reason}"))
-                }
-            }, backgroundHandler)
+            session.capture(captureRequest.build(), null, backgroundHandler)
 
         } catch (e: Exception) {
             Log.e(TAG, "takePhoto error", e)
+            pendingSavedCallback = null
+            pendingErrorCallback = null
             onError(e)
         }
     }
 
-    private var pendingCallback: ((Uri) -> Unit)? = null
-
-    private fun saveImage(image: android.media.Image) {
-        try {
+    private fun saveImage(image: android.media.Image): Uri? {
+        return try {
             val buffer = image.planes[0].buffer
             val bytes = ByteArray(buffer.remaining())
             buffer.get(bytes)
@@ -335,12 +332,12 @@ class Camera2Controller(private val context: Context) {
 
             FileOutputStream(file).use { it.write(bytes) }
 
-            // Pindah ke MediaStore
             val uri = MediaStoreHelper.saveToGallery(context, file)
             Log.d(TAG, "Saved: $uri")
-
+            uri
         } catch (e: Exception) {
             Log.e(TAG, "saveImage error", e)
+            null
         }
     }
 
@@ -370,17 +367,25 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun shutdown() {
+        closeCamera()
+        backgroundThread?.quitSafely()
+        backgroundThread = null
+        backgroundHandler = null
+    }
+
+    private fun closeCamera() {
         try {
             captureSession?.close()
             cameraDevice?.close()
             imageReader?.close()
-            backgroundThread?.quitSafely()
         } catch (e: Exception) {
-            Log.e(TAG, "shutdown error", e)
+            Log.e(TAG, "closeCamera error", e)
         }
         captureSession = null
         cameraDevice = null
         imageReader = null
+        previewSurface = null
         isReady = false
+        Log.d(TAG, "Camera closed")
     }
 }
