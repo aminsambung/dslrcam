@@ -11,6 +11,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
+import android.util.Size
 import android.view.Surface
 import android.view.TextureView
 import com.example.dslrcam.data.storage.MediaStoreHelper
@@ -35,7 +36,8 @@ class Camera2Controller(private val context: Context) {
     private var characteristics: CameraCharacteristics? = null
 
     private var previewSurface: Surface? = null
-    private var previewSize: android.util.Size? = null
+    private var previewSize: Size? = null
+    private var captureSize: Size? = null
     private var currentSettings: ManualSettings = ManualSettings()
 
     private var pendingSavedCallback: ((Uri) -> Unit)? = null
@@ -44,9 +46,6 @@ class Camera2Controller(private val context: Context) {
     var isReady = false
         private set
 
-    /**
-     * Panggil saat app dibuka. Buka kamera.
-     */
     @SuppressLint("MissingPermission")
     fun startCamera(
         textureView: TextureView,
@@ -54,7 +53,6 @@ class Camera2Controller(private val context: Context) {
         onError: (Throwable) -> Unit
     ) {
         try {
-            // Kalau sudah ready, tidak perlu buka lagi
             if (isReady) {
                 onReady()
                 return
@@ -84,7 +82,6 @@ class Camera2Controller(private val context: Context) {
                 override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
 
                 override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
-                    // PENTING: tutup kamera saat surface di-destroy
                     closeCamera()
                     return true
                 }
@@ -123,7 +120,7 @@ class Camera2Controller(private val context: Context) {
                 return
             }
 
-            // Pilih ukuran preview
+            // === PILIH RESOLUSI PREVIEW (rasio 4:3 atau 16:9, max 1920) ===
             val previewSizes = map.getOutputSizes(SurfaceTexture::class.java)
             previewSize = previewSizes
                 .filter { it.width <= 1920 && it.height <= 1080 }
@@ -133,13 +130,29 @@ class Camera2Controller(private val context: Context) {
             surfaceTexture.setDefaultBufferSize(previewSize!!.width, previewSize!!.height)
             previewSurface = Surface(surfaceTexture)
 
-            // ImageReader untuk capture JPEG
-            val captureSize = map.getOutputSizes(ImageFormat.JPEG)
-                .maxByOrNull { it.width * it.height } ?: previewSize!!
+            // === PILIH RESOLUSI CAPTURE MAKSIMAL ===
+            // Prioritaskan resolusi tinggi yang rasionya sama dengan preview
+            val previewRatio = previewSize!!.width.toFloat() / previewSize!!.height
+            val jpegSizes = map.getOutputSizes(ImageFormat.JPEG).toList()
 
+            // Coba cari yang rasionya sama & resolusi tinggi
+            val sameRatioSizes = jpegSizes.filter { size ->
+                val ratio = size.width.toFloat() / size.height
+                Math.abs(ratio - previewRatio) < 0.05f
+            }
+
+            // Ambil yang terbesar
+            captureSize = (sameRatioSizes.maxByOrNull { it.width * it.height }
+                ?: jpegSizes.maxByOrNull { it.width * it.height }
+                ?: previewSize!!)
+
+            Log.d(TAG, "Preview: ${previewSize!!.width}x${previewSize!!.height}")
+            Log.d(TAG, "Capture: ${captureSize!!.width}x${captureSize!!.height}")
+
+            // ImageReader untuk capture JPEG
             imageReader = ImageReader.newInstance(
-                captureSize.width,
-                captureSize.height,
+                captureSize!!.width,
+                captureSize!!.height,
                 ImageFormat.JPEG,
                 2
             )
@@ -202,6 +215,7 @@ class Camera2Controller(private val context: Context) {
                     try {
                         val previewRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                             addTarget(preview)
+                            applyQualitySettings(this)
                             applyManualSettings(this)
                         }
 
@@ -226,10 +240,71 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    /**
+     * Set kualitas gambar: OIS, stabilisasi, noise reduction, sharpness.
+     */
+    private fun applyQualitySettings(builder: CaptureRequest.Builder) {
+        val chars = characteristics ?: return
+
+        // === OPTICAL IMAGE STABILIZATION (OIS) ===
+        val oisAvailable = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)
+        if (oisAvailable != null && oisAvailable.contains(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)) {
+            builder.set(
+                CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
+            )
+            Log.d(TAG, "OIS enabled")
+        }
+
+        // === NOISE REDUCTION (High Quality) ===
+        val nrModes = chars.get(CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES)
+        if (nrModes != null) {
+            when {
+                nrModes.contains(CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY) -> {
+                    builder.set(
+                        CaptureRequest.NOISE_REDUCTION_MODE,
+                        CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY
+                    )
+                    Log.d(TAG, "Noise reduction: HIGH_QUALITY")
+                }
+                nrModes.contains(CaptureRequest.NOISE_REDUCTION_MODE_FAST) -> {
+                    builder.set(
+                        CaptureRequest.NOISE_REDUCTION_MODE,
+                        CaptureRequest.NOISE_REDUCTION_MODE_FAST
+                    )
+                }
+            }
+        }
+
+        // === EDGE MODE (Sharpness) ===
+        val edgeModes = chars.get(CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES)
+        if (edgeModes != null && edgeModes.contains(CaptureRequest.EDGE_MODE_HIGH_QUALITY)) {
+            builder.set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
+            Log.d(TAG, "Edge mode: HIGH_QUALITY")
+        }
+
+        // === HOT PIXEL MODE ===
+        val hotPixelModes = chars.get(CameraCharacteristics.HOT_PIXEL_AVAILABLE_HOT_PIXEL_MODES)
+        if (hotPixelModes != null && hotPixelModes.contains(CaptureRequest.HOT_PIXEL_MODE_HIGH_QUALITY)) {
+            builder.set(CaptureRequest.HOT_PIXEL_MODE, CaptureRequest.HOT_PIXEL_MODE_HIGH_QUALITY)
+        }
+
+        // === COLOR CORRECTION (High Quality) ===
+        builder.set(
+            CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
+            CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY
+        )
+
+        // === TONE MAP (High Quality) ===
+        val toneModes = chars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES)
+        if (toneModes != null && toneModes.contains(CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)) {
+            builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)
+        }
+    }
+
     private fun applyManualSettings(builder: CaptureRequest.Builder) {
         val chars = characteristics ?: return
 
-        // AE mode
         if (currentSettings.iso != null || currentSettings.shutterSpeedNs != null) {
             builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
 
@@ -250,7 +325,6 @@ class Camera2Controller(private val context: Context) {
             builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
         }
 
-        // WB
         currentSettings.whiteBalanceK?.let { k ->
             builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
             builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY)
@@ -259,7 +333,6 @@ class Camera2Controller(private val context: Context) {
             builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
         }
 
-        // Focus
         currentSettings.focusDistance?.let { dist ->
             builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
             builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, dist)
@@ -278,6 +351,7 @@ class Camera2Controller(private val context: Context) {
 
             val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(preview)
+                applyQualitySettings(this)
                 applyManualSettings(this)
             }
 
@@ -298,14 +372,19 @@ class Camera2Controller(private val context: Context) {
             return
         }
 
-        // Simpan callback untuk dipanggil saat image ready
         pendingSavedCallback = onSaved
         pendingErrorCallback = onError
 
         try {
             val captureRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                 addTarget(reader.surface)
+                applyQualitySettings(this)
                 applyManualSettings(this)
+
+                // JPEG quality MAX
+                set(CaptureRequest.JPEG_QUALITY, 100)
+
+                // JPEG orientation
                 set(CaptureRequest.JPEG_ORIENTATION, 90)
             }
 
@@ -333,7 +412,7 @@ class Camera2Controller(private val context: Context) {
             FileOutputStream(file).use { it.write(bytes) }
 
             val uri = MediaStoreHelper.saveToGallery(context, file)
-            Log.d(TAG, "Saved: $uri")
+            Log.d(TAG, "Saved: $uri (${bytes.size / 1024} KB)")
             uri
         } catch (e: Exception) {
             Log.e(TAG, "saveImage error", e)
