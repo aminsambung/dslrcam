@@ -138,7 +138,7 @@ class Camera2Controller(private val context: Context) {
                 image.close()
             }, backgroundHandler)
 
-            cameraManager!!.openCamera(cameraId, object : CameraDevice.StateCallback() {
+            cameraManager!!.openCamera(cameraId!!, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
                     cameraDevice = camera
                     createSession(onReady, onError)
