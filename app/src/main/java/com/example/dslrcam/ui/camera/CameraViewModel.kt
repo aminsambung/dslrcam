@@ -9,6 +9,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.ViewModel
 import com.example.dslrcam.data.camera.Camera2Controller
 import com.example.dslrcam.data.camera.ManualSettings
+import com.example.dslrcam.data.storage.MediaStoreHelper
+import com.example.dslrcam.utils.ImageProcessor
+import com.example.dslrcam.utils.PhotoFilters
+import java.io.File
 
 class CameraViewModel : ViewModel() {
 
@@ -20,10 +24,15 @@ class CameraViewModel : ViewModel() {
     var manualModeEnabled by mutableStateOf(false)
         private set
 
+    var filterPanelEnabled by mutableStateOf(false)
+        private set
+
+    var currentFilter by mutableStateOf(PhotoFilters.findById("normal"))
+        private set
+
     var lastPhotoUri by mutableStateOf<Uri?>(null)
         private set
 
-    /** Posisi tap-to-focus dalam koordinat view */
     var focusPoint by mutableStateOf<Offset?>(null)
         private set
 
@@ -41,6 +50,16 @@ class CameraViewModel : ViewModel() {
 
     fun toggleManualMode() {
         manualModeEnabled = !manualModeEnabled
+        if (manualModeEnabled) filterPanelEnabled = false
+    }
+
+    fun toggleFilterPanel() {
+        filterPanelEnabled = !filterPanelEnabled
+        if (filterPanelEnabled) manualModeEnabled = false
+    }
+
+    fun setFilter(filterId: String) {
+        currentFilter = PhotoFilters.findById(filterId)
     }
 
     fun onTapFocus(offset: Offset, viewWidth: Int, viewHeight: Int) {
@@ -75,6 +94,59 @@ class CameraViewModel : ViewModel() {
     fun resetManual() {
         manualSettings = ManualSettings()
         controller?.updateManualSettings(manualSettings)
+    }
+
+    /**
+     * Apply filter ke foto hasil capture.
+     * Dipanggil dari CameraScreen setelah takePhoto berhasil.
+     */
+    fun applyFilterToUri(context: Context, uri: Uri) {
+        try {
+            // Kalau Normal — langsung pakai
+            if (currentFilter.matrix == null) {
+                onPhotoSaved(uri)
+                return
+            }
+
+            // Baca isi uri ke file temporary
+            val inputStream = context.contentResolver.openInputStream(uri)
+            if (inputStream == null) {
+                onPhotoSaved(uri)
+                return
+            }
+
+            val tempFile = File(context.cacheDir, "temp_original.jpg")
+            tempFile.outputStream().use { output ->
+                inputStream.copyTo(output)
+            }
+            inputStream.close()
+
+            // Apply filter
+            val filteredFile = ImageProcessor.applyFilterToFile(tempFile, currentFilter)
+
+            if (filteredFile != null && filteredFile.exists()) {
+                // Simpan ke MediaStore
+                val newUri = MediaStoreHelper.saveToGallery(context, filteredFile)
+
+                // Hapus file original dari MediaStore (opsional)
+                try {
+                    context.contentResolver.delete(uri, null, null)
+                } catch (e: Exception) {
+                    // Abaikan kalau gagal hapus
+                }
+
+                if (newUri != null) {
+                    onPhotoSaved(newUri)
+                } else {
+                    onPhotoSaved(uri)
+                }
+            } else {
+                onPhotoSaved(uri)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            onPhotoSaved(uri)
+        }
     }
 
     override fun onCleared() {
