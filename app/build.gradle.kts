@@ -78,8 +78,9 @@ dependencies {
     // Permission
     implementation("com.google.accompanist:accompanist-permissions:0.34.0")
 
+    // Coil untuk load gambar di galeri
+    implementation("io.coil-kt:coil-compose:2.7.0")
+
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
-// Coil untuk load gambar
-implementation("io.coil-kt:coil-compose:2.7.0")
