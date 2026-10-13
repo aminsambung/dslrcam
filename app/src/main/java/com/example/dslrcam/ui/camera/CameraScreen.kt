@@ -7,6 +7,7 @@ import android.view.TextureView
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -22,9 +23,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -40,6 +43,7 @@ import com.example.dslrcam.utils.Permissions
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -49,6 +53,8 @@ fun CameraScreen(
 ) {
     val context = LocalContext.current
     val cameraPermission = rememberPermissionState(Permissions.CAMERA)
+
+    var viewSize by remember { mutableStateOf(Pair(0, 0)) }
 
     LaunchedEffect(Unit) {
         if (!cameraPermission.status.isGranted) {
@@ -61,10 +67,21 @@ fun CameraScreen(
         viewModel.getController()
     }
 
+    // Auto-hide kotak fokus setelah 2 detik
+    LaunchedEffect(viewModel.focusPoint) {
+        if (viewModel.focusPoint != null) {
+            delay(2000)
+            viewModel.clearFocusPoint()
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(BackgroundDark)
+            .onSizeChanged { size ->
+                viewSize = Pair(size.width, size.height)
+            }
     ) {
         if (cameraPermission.status.isGranted && controller != null) {
             AndroidView(
@@ -92,10 +109,16 @@ fun CameraScreen(
                     .fillMaxSize()
                     .pointerInput(Unit) {
                         detectTapGestures(
-                            onTap = {
+                            onTap = { offset ->
+                                // Tap = fokus + tutup panel manual
                                 if (viewModel.manualModeEnabled) {
                                     viewModel.toggleManualMode()
                                 }
+                                viewModel.onTapFocus(
+                                    offset,
+                                    viewSize.first,
+                                    viewSize.second
+                                )
                             },
                             onLongPress = {
                                 if (viewModel.manualModeEnabled) {
@@ -110,6 +133,19 @@ fun CameraScreen(
                         )
                     }
             )
+
+            // Kotak fokus (kalau ada)
+            viewModel.focusPoint?.let { point ->
+                Box(
+                    modifier = Modifier
+                        .offset(
+                            x = (point.x - 40).dp.coerceAtLeast(0.dp),
+                            y = (point.y - 40).dp.coerceAtLeast(0.dp)
+                        )
+                        .size(80.dp)
+                        .border(2.dp, Accent)
+                )
+            }
 
             // TopBar
             Row(
@@ -205,7 +241,7 @@ fun CameraScreen(
                     }
             )
 
-            // Thumbnail — klik buka album HP
+            // Thumbnail
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
@@ -274,11 +310,6 @@ private fun formatShutterShort(ns: Long): String {
     return "1/$denom"
 }
 
-/**
- * Buka album HP.
- * Kalau ada foto terakhir -> buka foto itu.
- * Kalau belum -> buka app galeri default.
- */
 private fun openSystemGallery(context: Context, lastPhotoUri: Uri?) {
     try {
         val intent = if (lastPhotoUri != null) {
@@ -287,7 +318,6 @@ private fun openSystemGallery(context: Context, lastPhotoUri: Uri?) {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
         } else {
-            // Belum ada foto — buka app galeri default
             Intent(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_APP_GALLERY)
             }
