@@ -1,9 +1,9 @@
 package com.example.dslrcam.ui.camera
 
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import com.example.dslrcam.data.camera.CameraController
-import java.io.File
 
 class CameraViewModel : ViewModel() {
 
@@ -17,11 +17,11 @@ class CameraViewModel : ViewModel() {
 
     fun getController(): CameraController? = controller
 
-    var lastPhoto: File? = null
+    var lastPhotoUri: Uri? = null
         private set
 
-    fun onPhotoSaved(file: File) {
-        lastPhoto = file
+    fun onPhotoSaved(uri: Uri) {
+        lastPhotoUri = uri
     }
 
     override fun onCleared() {
