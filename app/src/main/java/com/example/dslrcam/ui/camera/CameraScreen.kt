@@ -1,5 +1,8 @@
 package com.example.dslrcam.ui.camera
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.view.TextureView
 import android.view.ViewGroup
 import android.widget.Toast
@@ -41,7 +44,6 @@ import com.google.accompanist.permissions.rememberPermissionState
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun CameraScreen(
-    onOpenGallery: () -> Unit,
     onOpenSettings: () -> Unit,
     viewModel: CameraViewModel = viewModel()
 ) {
@@ -188,7 +190,7 @@ fun CameraScreen(
                                 viewModel.onPhotoSaved(uri)
                                 Toast.makeText(
                                     context,
-                                    "Foto tersimpan",
+                                    "Foto tersimpan ke Galeri",
                                     Toast.LENGTH_SHORT
                                 ).show()
                             },
@@ -203,7 +205,7 @@ fun CameraScreen(
                     }
             )
 
-            // Tombol Galeri — thumbnail
+            // Thumbnail — klik buka album HP
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
@@ -211,7 +213,9 @@ fun CameraScreen(
                     .size(56.dp)
                     .clip(CircleShape)
                     .background(Color(0x66000000))
-                    .clickable { onOpenGallery() },
+                    .clickable {
+                        openSystemGallery(context, viewModel.lastPhotoUri)
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 val lastUri = viewModel.lastPhotoUri
@@ -268,4 +272,32 @@ private fun formatShutterShort(ns: Long): String {
     }
     val denom = (1_000_000_000L / ns).toInt()
     return "1/$denom"
+}
+
+/**
+ * Buka album HP.
+ * Kalau ada foto terakhir -> buka foto itu.
+ * Kalau belum -> buka app galeri default.
+ */
+private fun openSystemGallery(context: Context, lastPhotoUri: Uri?) {
+    try {
+        val intent = if (lastPhotoUri != null) {
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(lastPhotoUri, "image/*")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        } else {
+            // Belum ada foto — buka app galeri default
+            Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_APP_GALLERY)
+            }
+        }
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(
+            context,
+            "Tidak ada aplikasi galeri terinstall",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
 }
