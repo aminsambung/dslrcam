@@ -1,6 +1,7 @@
 package com.example.dslrcam.data.camera
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
@@ -10,6 +11,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
+import com.example.dslrcam.data.storage.MediaStoreHelper
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -66,7 +68,7 @@ class CameraController(private val context: Context) {
         }, ContextCompat.getMainExecutor(context))
     }
 
-    fun takePhoto(onSaved: (File) -> Unit, onError: (Throwable) -> Unit) {
+    fun takePhoto(onSaved: (Uri) -> Unit, onError: (Throwable) -> Unit) {
         val capture = imageCapture
 
         if (capture == null || !isReady) {
@@ -76,33 +78,35 @@ class CameraController(private val context: Context) {
             return
         }
 
-        // Pastikan folder ada (jangan sampai null)
-        val dir = context.getExternalFilesDir("photos")
-            ?: File(context.filesDir, "photos").also { it.mkdirs() }
-
-        if (!dir.exists()) {
-            dir.mkdirs()
-        }
+        // File temporary di folder internal
+        val dir = File(context.cacheDir, "photos").also { it.mkdirs() }
 
         val name = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
             .format(System.currentTimeMillis())
-        val file = File(dir, "DSLRCam_$name.jpg")
+        val tempFile = File(dir, "DSLRCam_$name.jpg")
 
-        Log.d(TAG, "Saving to: ${file.absolutePath}")
-
-        val options = ImageCapture.OutputFileOptions.Builder(file).build()
+        val options = ImageCapture.OutputFileOptions.Builder(tempFile).build()
 
         capture.takePicture(
             options,
             ContextCompat.getMainExecutor(context),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    Log.d(TAG, "Foto tersimpan: ${file.absolutePath}")
-                    onSaved(file)
+                    Log.d(TAG, "Temp tersimpan: ${tempFile.absolutePath}")
+
+                    // Pindah ke MediaStore
+                    val uri = MediaStoreHelper.saveToGallery(context, tempFile)
+
+                    if (uri != null) {
+                        Log.d(TAG, "MediaStore URI: $uri")
+                        onSaved(uri)
+                    } else {
+                        onError(IllegalStateException("Gagal simpan ke MediaStore"))
+                    }
                 }
 
                 override fun onError(exc: ImageCaptureException) {
-                    Log.e(TAG, "Gagal simpan foto", exc)
+                    Log.e(TAG, "Gagal capture", exc)
                     onError(exc)
                 }
             }
