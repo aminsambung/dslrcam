@@ -6,12 +6,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
-import com.example.dslrcam.data.camera.CameraController
+import com.example.dslrcam.data.camera.Camera2Controller
 import com.example.dslrcam.data.camera.ManualSettings
 
 class CameraViewModel : ViewModel() {
 
-    private var controller: CameraController? = null
+    private var controller: Camera2Controller? = null
 
     var manualSettings by mutableStateOf(ManualSettings())
         private set
@@ -24,11 +24,11 @@ class CameraViewModel : ViewModel() {
 
     fun initController(context: Context) {
         if (controller == null) {
-            controller = CameraController(context.applicationContext)
+            controller = Camera2Controller(context.applicationContext)
         }
     }
 
-    fun getController(): CameraController? = controller
+    fun getController(): Camera2Controller? = controller
 
     fun onPhotoSaved(uri: Uri) {
         lastPhotoUri = uri
