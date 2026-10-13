@@ -81,3 +81,5 @@ dependencies {
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
+// Coil untuk load gambar
+implementation("io.coil-kt:coil-compose:2.7.0")
