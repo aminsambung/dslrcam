@@ -27,10 +27,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -48,6 +49,7 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -58,10 +60,12 @@ fun CameraScreen(
     val context = LocalContext.current
     val cameraPermission = rememberPermissionState(Permissions.CAMERA)
 
-    var viewSize by remember { mutableStateOf(Pair(0, 0)) }
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    var alreadyRequested by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        if (!cameraPermission.status.isGranted) {
+    LaunchedEffect(cameraPermission.status.isGranted) {
+        if (!cameraPermission.status.isGranted && !alreadyRequested) {
+            alreadyRequested = true
             cameraPermission.launchPermissionRequest()
         }
     }
@@ -71,22 +75,30 @@ fun CameraScreen(
         viewModel.getController()
     }
 
-    // Auto-hide kotak fokus
+    // Auto-hide kotak fokus setelah 5 detik
     LaunchedEffect(viewModel.focusPoint) {
         if (viewModel.focusPoint != null) {
-            delay(2000)
+            delay(5000)
             viewModel.clearFocusPoint()
         }
     }
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(BackgroundDark)
-            .onSizeChanged { size ->
-                viewSize = Pair(size.width, size.height)
-            }
     ) {
+        // Ukuran container dalam pixel
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val containerW = with(density) { maxWidth.toPx() }.roundToInt()
+        val containerH = with(density) { maxHeight.toPx() }.roundToInt()
+
+        LaunchedEffect(containerW, containerH) {
+            if (containerW > 0 && containerH > 0) {
+                containerSize = IntSize(containerW, containerH)
+            }
+        }
+
         if (cameraPermission.status.isGranted && controller != null) {
             // PREVIEW
             AndroidView(
@@ -107,34 +119,47 @@ fun CameraScreen(
                 },
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(Unit) {
+                    .pointerInput(containerSize) {
                         detectTapGestures(
                             onTap = { offset ->
-                                // Tap layar -> tutup semua panel + focus
                                 if (viewModel.manualModeEnabled) viewModel.toggleManualMode()
                                 if (viewModel.filterPanelEnabled) viewModel.toggleFilterPanel()
-                                viewModel.onTapFocus(offset, viewSize.first, viewSize.second)
+
+                                // Simpan titik fokus dalam koordinat pixel container
+                                viewModel.setFocusPoint(offset)
+
+                                // Kirim ke controller
+                                if (containerSize.width > 0 && containerSize.height > 0) {
+                                    controller.tapToFocus(
+                                        viewX = offset.x,
+                                        viewY = offset.y,
+                                        viewWidth = containerSize.width,
+                                        viewHeight = containerSize.height
+                                    )
+                                }
                             },
                             onLongPress = {
                                 if (viewModel.manualModeEnabled) {
                                     viewModel.resetManual()
-                                    Toast.makeText(context, "Manual direset ke Auto", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Manual direset", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         )
                     }
             )
 
-            // Kotak fokus
+            // KOTAK FOKUS — pakai IntOffset untuk presisi pixel
             viewModel.focusPoint?.let { point ->
                 Box(
                     modifier = Modifier
-                        .offset(
-                            x = (point.x - 40).dp.coerceAtLeast(0.dp),
-                            y = (point.y - 40).dp.coerceAtLeast(0.dp)
-                        )
+                        .offset {
+                            IntOffset(
+                                x = (point.x - 40.dp.toPx()).roundToInt().coerceAtLeast(0),
+                                y = (point.y - 40.dp.toPx()).roundToInt().coerceAtLeast(0)
+                            )
+                        }
                         .size(80.dp)
-                        .border(2.dp, Accent)
+                        .border(2.dp, Accent, RoundedCornerShape(4.dp))
                 )
             }
 
@@ -171,7 +196,6 @@ fun CameraScreen(
 
                 Spacer(Modifier.weight(1f))
 
-                // Tombol M (manual) — kanan atas
                 Text(
                     text = "M",
                     color = if (viewModel.manualModeEnabled) BackgroundDark else TextPrimary,
@@ -204,13 +228,13 @@ fun CameraScreen(
                 )
             }
 
-            // PANEL FILTER — popup di tengah bawah
+            // PANEL FILTER
             if (viewModel.filterPanelEnabled) {
                 FilterPopup(
                     currentFilterId = viewModel.currentFilter.id,
                     onSelect = { id ->
                         viewModel.setFilter(id)
-                        viewModel.toggleFilterPanel()  // langsung tutup setelah pilih
+                        viewModel.toggleFilterPanel()
                     },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -243,7 +267,7 @@ fun CameraScreen(
                     }
             )
 
-            // THUMBNAIL — kiri bawah
+            // THUMBNAIL
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
@@ -272,7 +296,7 @@ fun CameraScreen(
                 }
             }
 
-            // IKON FILTER (magic wand) — kanan bawah, sebelum settings
+            // TOMBOL FILTER
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -293,7 +317,7 @@ fun CameraScreen(
                 )
             }
 
-            // TOMBOL SETTINGS — kanan bawah
+            // TOMBOL SETTINGS
             IconButton(
                 onClick = onOpenSettings,
                 modifier = Modifier
@@ -308,21 +332,32 @@ fun CameraScreen(
             }
 
         } else {
-            Text(
-                text = "Izin kamera dibutuhkan.\nTekan untuk minta izin.",
-                color = TextPrimary,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .clickable { cameraPermission.launchPermissionRequest() }
-            )
+            Column(
+                modifier = Modifier.align(Alignment.Center),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Izin kamera dibutuhkan",
+                    color = TextPrimary,
+                    fontSize = 16.sp
+                )
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = "Ketuk untuk memberi izin",
+                    color = Accent,
+                    fontSize = 14.sp,
+                    modifier = Modifier
+                        .background(Color(0x33FFC107), RoundedCornerShape(8.dp))
+                        .clickable {
+                            cameraPermission.launchPermissionRequest()
+                        }
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
         }
     }
 }
 
-/**
- * Popup filter — muncul di atas shutter.
- * Grid 3 kolom dengan nama filter.
- */
 @Composable
 private fun FilterPopup(
     currentFilterId: String,
