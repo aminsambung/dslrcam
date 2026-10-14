@@ -16,6 +16,7 @@ object PhotoFilters {
         Filter("pixel", "Pixel", pixel()),
         Filter("samsung", "Samsung", samsung()),
         Filter("glowing", "Glowing", glowing()),
+        Filter("cinematic", "Cinematic", cinematic()),
         Filter("mono", "Mono", mono())
     )
 
@@ -23,7 +24,33 @@ object PhotoFilters {
         return ALL.firstOrNull { it.id == id } ?: ALL.first()
     }
 
-    // iPhone: natural, hangat, kontras sedang
+    /**
+     * Buat matrix dengan intensitas tertentu.
+     * strength: 0.0 (tanpa efek) - 1.0 (efek penuh)
+     */
+    fun withStrength(filter: Filter, strength: Float): ColorMatrix? {
+        val base = filter.matrix ?: return null
+        if (strength >= 1f) return base
+        if (strength <= 0f) return null
+
+        val identity = floatArrayOf(
+            1f, 0f, 0f, 0f, 0f,
+            0f, 1f, 0f, 0f, 0f,
+            0f, 0f, 1f, 0f, 0f,
+            0f, 0f, 0f, 1f, 0f
+        )
+
+        val filterArray = FloatArray(20)
+        base.getArray(filterArray)
+
+        val blended = FloatArray(20) { i ->
+            identity[i] * (1f - strength) + filterArray[i] * strength
+        }
+
+        return ColorMatrix(blended)
+    }
+
+    // === iPhone: natural, hangat, kontras sedang ===
     private fun iphone() = ColorMatrix(floatArrayOf(
         1.05f, 0.00f, 0.00f, 0f, 3f,
         0.00f, 1.02f, 0.00f, 0f, 2f,
@@ -31,7 +58,7 @@ object PhotoFilters {
         0f, 0f, 0f, 1f, 0f
     ))
 
-    // Pixel: kontras tinggi, vivid, tegas
+    // === Pixel: kontras tinggi, vivid, tegas ===
     private fun pixel() = ColorMatrix(floatArrayOf(
         1.25f, -0.10f, -0.05f, 0f, -10f,
         -0.05f, 1.25f, -0.10f, 0f, -10f,
@@ -39,7 +66,7 @@ object PhotoFilters {
         0f, 0f, 0f, 1f, 0f
     ))
 
-    // Samsung: saturasi tinggi, warna "pop"
+    // === Samsung: saturasi tinggi, warna "pop" ===
     private fun samsung() = ColorMatrix(floatArrayOf(
         1.35f, -0.15f, -0.10f, 0f, 0f,
         -0.10f, 1.35f, -0.15f, 0f, 0f,
@@ -47,18 +74,26 @@ object PhotoFilters {
         0f, 0f, 0f, 1f, 0f
     ))
 
-    // Glowing — tiru efek GCam "Colorful Photo":
-    // - Warna cerah (saturasi tinggi)
-    // - Hijau vibrant (green boost)
-    // - Highlight lembut (offset +)
+    // === Glowing (dari config GCam "Colorful Photo") ===
+    // - Color mode: colorful (saturasi tinggi)
+    // - Green boost (hijau vibrant)
+    // - Highlight soft (offset kecil positif → efek glow)
     // - Kontras sedang
     private fun glowing() = ColorMatrix(floatArrayOf(
-        1.30f, -0.10f, -0.05f, 0f, 15f,    // R kuat, tambah terang (glow)
-        -0.05f, 1.35f, -0.05f, 0f, 18f,    // G paling kuat (hijau vibrant), glow
-        -0.10f, -0.05f, 1.25f, 0f, 12f,    // B kuat, sedikit lebih rendah (hangat)
+        1.15f, -0.05f, 0.00f, 0f, 5f,       // R naik sedang, hangat tipis
+        -0.05f, 1.25f, -0.05f, 0f, 8f,      // G paling naik (green boost), glow
+        -0.05f, -0.05f, 1.20f, 0f, 5f,      // B naik sedang
         0f, 0f, 0f, 1f, 0f
     ))
 
-    // Mono: hitam putih
+    // === Cinematic: biru pekat, hijau vibrant, kontras tinggi ===
+    private fun cinematic() = ColorMatrix(floatArrayOf(
+        0.95f, -0.10f, -0.05f, 0f, -5f,     // R turun, dingin
+        -0.05f, 1.15f, -0.05f, 0f, 0f,      // G naik sedikit
+        -0.10f, -0.10f, 1.40f, 0f, 10f,     // B naik banyak (langit pekat)
+        0f, 0f, 0f, 1f, 0f
+    ))
+
+    // === Mono: hitam putih ===
     private fun mono() = ColorMatrix().apply { setSaturation(0f) }
 }
