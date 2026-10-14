@@ -504,7 +504,7 @@ class Camera2Controller(private val context: Context) {
         backgroundHandler = null
     }
 
-    private fun closeCamera() {
+    fun closeCamera() {
         try {
             captureSession?.close()
             cameraDevice?.close()
