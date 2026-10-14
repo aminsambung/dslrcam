@@ -40,8 +40,7 @@ object PhotoFilters {
             0f, 0f, 0f, 1f, 0f
         )
 
-        val filterArray = FloatArray(20)
-        base.getArray(filterArray)
+        val filterArray = FloatArray = base.array
 
         val blended = FloatArray(20) { i ->
             identity[i] * (1f - strength) + filterArray[i] * strength
