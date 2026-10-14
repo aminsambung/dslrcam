@@ -2,9 +2,6 @@ package com.example.dslrcam.utils
 
 import android.graphics.ColorMatrix
 
-/**
- * Filter warna dengan karakter ala HP flagship.
- */
 object PhotoFilters {
 
     data class Filter(
@@ -18,6 +15,7 @@ object PhotoFilters {
         Filter("iphone", "iPhone", iphone()),
         Filter("pixel", "Pixel", pixel()),
         Filter("samsung", "Samsung", samsung()),
+        Filter("glowing", "Glowing", glowing()),
         Filter("mono", "Mono", mono())
     )
 
@@ -46,6 +44,18 @@ object PhotoFilters {
         1.35f, -0.15f, -0.10f, 0f, 0f,
         -0.10f, 1.35f, -0.15f, 0f, 0f,
         -0.15f, -0.10f, 1.35f, 0f, 0f,
+        0f, 0f, 0f, 1f, 0f
+    ))
+
+    // Glowing — tiru efek GCam "Colorful Photo":
+    // - Warna cerah (saturasi tinggi)
+    // - Hijau vibrant (green boost)
+    // - Highlight lembut (offset +)
+    // - Kontras sedang
+    private fun glowing() = ColorMatrix(floatArrayOf(
+        1.30f, -0.10f, -0.05f, 0f, 15f,    // R kuat, tambah terang (glow)
+        -0.05f, 1.35f, -0.05f, 0f, 18f,    // G paling kuat (hijau vibrant), glow
+        -0.10f, -0.05f, 1.25f, 0f, 12f,    // B kuat, sedikit lebih rendah (hangat)
         0f, 0f, 0f, 1f, 0f
     ))
 
