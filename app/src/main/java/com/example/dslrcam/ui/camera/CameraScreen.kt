@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
@@ -35,6 +36,8 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.dslrcam.ui.camera.components.ManualPanel
@@ -58,11 +61,14 @@ fun CameraScreen(
     viewModel: CameraViewModel = viewModel()
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val cameraPermission = rememberPermissionState(Permissions.CAMERA)
 
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
     var alreadyRequested by remember { mutableStateOf(false) }
+    var textureView by remember { mutableStateOf<TextureView?>(null) }
 
+    // Minta izin SEKALI saja
     LaunchedEffect(cameraPermission.status.isGranted) {
         if (!cameraPermission.status.isGranted && !alreadyRequested) {
             alreadyRequested = true
@@ -73,6 +79,39 @@ fun CameraScreen(
     val controller = remember {
         viewModel.initController(context)
         viewModel.getController()
+    }
+
+    // Lifecycle observer: buka/tutup kamera saat resume/pause
+    DisposableEffect(lifecycleOwner, cameraPermission.status.isGranted) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (cameraPermission.status.isGranted) {
+                when (event) {
+                    Lifecycle.Event.ON_RESUME -> {
+                        // Re-open camera saat kembali ke app
+                        textureView?.let { tv ->
+                            if (tv.isAvailable) {
+                                controller?.startCamera(
+                                    textureView = tv,
+                                    onReady = {},
+                                    onError = { e ->
+                                        Toast.makeText(context, "Kamera: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Lifecycle.Event.ON_PAUSE -> {
+                        // Tutup camera saat app ke background
+                        controller?.closeCamera()
+                    }
+                    else -> {}
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     // Auto-hide kotak fokus setelah 5 detik
@@ -88,19 +127,17 @@ fun CameraScreen(
             .fillMaxSize()
             .background(BackgroundDark)
     ) {
-        // Ukuran container dalam pixel
         val density = androidx.compose.ui.platform.LocalDensity.current
-        val containerW = with(density) { maxWidth.toPx() }.roundToInt()
-        val containerH = with(density) { maxHeight.toPx() }.roundToInt()
+        val cW = with(density) { maxWidth.toPx() }.roundToInt()
+        val cH = with(density) { maxHeight.toPx() }.roundToInt()
 
-        LaunchedEffect(containerW, containerH) {
-            if (containerW > 0 && containerH > 0) {
-                containerSize = IntSize(containerW, containerH)
+        LaunchedEffect(cW, cH) {
+            if (cW > 0 && cH > 0) {
+                containerSize = IntSize(cW, cH)
             }
         }
 
         if (cameraPermission.status.isGranted && controller != null) {
-            // PREVIEW
             AndroidView(
                 factory = { ctx ->
                     TextureView(ctx).apply {
@@ -108,6 +145,7 @@ fun CameraScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
+                        textureView = this
                         controller.startCamera(
                             textureView = this,
                             onReady = {},
@@ -125,10 +163,8 @@ fun CameraScreen(
                                 if (viewModel.manualModeEnabled) viewModel.toggleManualMode()
                                 if (viewModel.filterPanelEnabled) viewModel.toggleFilterPanel()
 
-                                // Simpan titik fokus dalam koordinat pixel container
                                 viewModel.setFocusPoint(offset)
 
-                                // Kirim ke controller
                                 if (containerSize.width > 0 && containerSize.height > 0) {
                                     controller.tapToFocus(
                                         viewX = offset.x,
@@ -148,7 +184,7 @@ fun CameraScreen(
                     }
             )
 
-            // KOTAK FOKUS — pakai IntOffset untuk presisi pixel
+            // Kotak fokus
             viewModel.focusPoint?.let { point ->
                 Box(
                     modifier = Modifier
@@ -210,7 +246,6 @@ fun CameraScreen(
                 )
             }
 
-            // PANEL MANUAL
             if (viewModel.manualModeEnabled) {
                 ManualPanel(
                     iso = viewModel.manualSettings.iso,
@@ -228,7 +263,6 @@ fun CameraScreen(
                 )
             }
 
-            // PANEL FILTER
             if (viewModel.filterPanelEnabled) {
                 FilterPopup(
                     currentFilterId = viewModel.currentFilter.id,
@@ -242,7 +276,7 @@ fun CameraScreen(
                 )
             }
 
-            // TOMBOL SHUTTER
+            // SHUTTER
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -296,7 +330,7 @@ fun CameraScreen(
                 }
             }
 
-            // TOMBOL FILTER
+            // FILTER
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -317,7 +351,7 @@ fun CameraScreen(
                 )
             }
 
-            // TOMBOL SETTINGS
+            // SETTINGS
             IconButton(
                 onClick = onOpenSettings,
                 modifier = Modifier
@@ -377,10 +411,7 @@ private fun FilterPopup(
             letterSpacing = 2.sp,
             modifier = Modifier.padding(bottom = 8.dp)
         )
-
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PhotoFilters.ALL.forEach { filter ->
                 val selected = filter.id == currentFilterId
                 Column(
@@ -393,9 +424,7 @@ private fun FilterPopup(
                         modifier = Modifier
                             .size(56.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                if (selected) Accent else Color(0x33FFFFFF)
-                            )
+                            .background(if (selected) Accent else Color(0x33FFFFFF))
                             .border(
                                 width = if (selected) 2.dp else 0.dp,
                                 color = if (selected) TextPrimary else Color.Transparent,
