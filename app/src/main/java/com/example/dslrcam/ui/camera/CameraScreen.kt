@@ -19,6 +19,8 @@ import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,9 +29,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -68,7 +72,6 @@ fun CameraScreen(
     var alreadyRequested by remember { mutableStateOf(false) }
     var textureView by remember { mutableStateOf<TextureView?>(null) }
 
-    // Minta izin SEKALI saja
     LaunchedEffect(cameraPermission.status.isGranted) {
         if (!cameraPermission.status.isGranted && !alreadyRequested) {
             alreadyRequested = true
@@ -81,13 +84,12 @@ fun CameraScreen(
         viewModel.getController()
     }
 
-    // Lifecycle observer: buka/tutup kamera saat resume/pause
+    // Lifecycle observer
     DisposableEffect(lifecycleOwner, cameraPermission.status.isGranted) {
         val observer = LifecycleEventObserver { _, event ->
             if (cameraPermission.status.isGranted) {
                 when (event) {
                     Lifecycle.Event.ON_RESUME -> {
-                        // Re-open camera saat kembali ke app
                         textureView?.let { tv ->
                             if (tv.isAvailable) {
                                 controller?.startCamera(
@@ -101,7 +103,6 @@ fun CameraScreen(
                         }
                     }
                     Lifecycle.Event.ON_PAUSE -> {
-                        // Tutup camera saat app ke background
                         controller?.closeCamera()
                     }
                     else -> {}
@@ -114,7 +115,7 @@ fun CameraScreen(
         }
     }
 
-    // Auto-hide kotak fokus setelah 5 detik
+    // Auto-hide kotak fokus
     LaunchedEffect(viewModel.focusPoint) {
         if (viewModel.focusPoint != null) {
             delay(5000)
@@ -138,6 +139,7 @@ fun CameraScreen(
         }
 
         if (cameraPermission.status.isGranted && controller != null) {
+            // PREVIEW
             AndroidView(
                 factory = { ctx ->
                     TextureView(ctx).apply {
@@ -199,7 +201,7 @@ fun CameraScreen(
                 )
             }
 
-            // TOP BAR
+            // === TOP BAR ===
             Row(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
@@ -207,6 +209,7 @@ fun CameraScreen(
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Info manual (kalau ada)
                 val hasManualSetting = viewModel.manualSettings.iso != null ||
                         viewModel.manualSettings.shutterSpeedNs != null ||
                         viewModel.manualSettings.whiteBalanceK != null
@@ -232,6 +235,41 @@ fun CameraScreen(
 
                 Spacer(Modifier.weight(1f))
 
+                // === TOMBOL HDR ===
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "HDR",
+                        color = if (viewModel.hdrEnabled) BackgroundDark else TextPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .background(
+                                if (viewModel.hdrEnabled) Accent else Color(0xCC000000),
+                                RoundedCornerShape(20.dp)
+                            )
+                            .clickable { viewModel.toggleHdr() }
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+
+                    // Indikator "3 frame" kalau HDR aktif
+                    if (viewModel.hdrEnabled) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "3 frame",
+                            color = Accent,
+                            fontSize = 8.sp,
+                            modifier = Modifier
+                                .background(Color(0xCC000000), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
+                }
+
+                Spacer(Modifier.width(8.dp))
+
+                // Tombol M
                 Text(
                     text = "M",
                     color = if (viewModel.manualModeEnabled) BackgroundDark else TextPrimary,
@@ -246,6 +284,7 @@ fun CameraScreen(
                 )
             }
 
+            // PANEL MANUAL
             if (viewModel.manualModeEnabled) {
                 ManualPanel(
                     iso = viewModel.manualSettings.iso,
@@ -263,13 +302,13 @@ fun CameraScreen(
                 )
             }
 
+            // PANEL FILTER
             if (viewModel.filterPanelEnabled) {
-                FilterPopup(
+                FilterPanelWithSlider(
                     currentFilterId = viewModel.currentFilter.id,
-                    onSelect = { id ->
-                        viewModel.setFilter(id)
-                        viewModel.toggleFilterPanel()
-                    },
+                    currentStrength = viewModel.filterStrength,
+                    onSelect = { id -> viewModel.setFilter(id) },
+                    onStrengthChange = { strength -> viewModel.setFilterStrength(strength) },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 140.dp)
@@ -288,9 +327,10 @@ fun CameraScreen(
                         controller.takePhoto(
                             onSaved = { uri ->
                                 viewModel.applyFilterToUri(context, uri)
+                                val label = if (viewModel.hdrEnabled) "HDR + ${viewModel.currentFilter.name}" else viewModel.currentFilter.name
                                 Toast.makeText(
                                     context,
-                                    "Foto (${viewModel.currentFilter.name})",
+                                    "Foto ($label)",
                                     Toast.LENGTH_SHORT
                                 ).show()
                             },
@@ -330,7 +370,7 @@ fun CameraScreen(
                 }
             }
 
-            // FILTER
+            // TOMBOL FILTER
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -351,7 +391,7 @@ fun CameraScreen(
                 )
             }
 
-            // SETTINGS
+            // TOMBOL SETTINGS
             IconButton(
                 onClick = onOpenSettings,
                 modifier = Modifier
@@ -392,10 +432,13 @@ fun CameraScreen(
     }
 }
 
+// === FILTER PANEL ===
 @Composable
-private fun FilterPopup(
+private fun FilterPanelWithSlider(
     currentFilterId: String,
+    currentStrength: Float,
     onSelect: (String) -> Unit,
+    onStrengthChange: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -411,7 +454,51 @@ private fun FilterPopup(
             letterSpacing = 2.sp,
             modifier = Modifier.padding(bottom = 8.dp)
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+        // Slider intensitas
+        if (currentFilterId != "normal") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${(currentStrength * 100).toInt()}%",
+                    color = Accent,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.width(48.dp)
+                )
+
+                Slider(
+                    value = currentStrength,
+                    onValueChange = onStrengthChange,
+                    valueRange = 0f..1f,
+                    modifier = Modifier.weight(1f),
+                    colors = SliderDefaults.colors(
+                        thumbColor = Accent,
+                        activeTrackColor = Accent,
+                        inactiveTrackColor = Color(0x33FFFFFF)
+                    )
+                )
+
+                Spacer(Modifier.width(8.dp))
+
+                Text(
+                    text = "100%",
+                    color = TextSecondary,
+                    fontSize = 10.sp
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // Grid filter
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             PhotoFilters.ALL.forEach { filter ->
                 val selected = filter.id == currentFilterId
                 Column(
@@ -424,7 +511,9 @@ private fun FilterPopup(
                         modifier = Modifier
                             .size(56.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(if (selected) Accent else Color(0x33FFFFFF))
+                            .background(
+                                if (selected) Accent else Color(0x33FFFFFF)
+                            )
                             .border(
                                 width = if (selected) 2.dp else 0.dp,
                                 color = if (selected) TextPrimary else Color.Transparent,
