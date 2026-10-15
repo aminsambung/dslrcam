@@ -46,6 +46,10 @@ class Camera2Controller(private val context: Context) {
     private var captureSize: Size? = null
     private var currentSettings: ManualSettings = ManualSettings()
 
+    // === HDR ===
+    private var hdrEnabled = false
+    private var hdrCapture: HdrCapture? = null
+
     private var pendingSavedCallback: ((Uri) -> Unit)? = null
     private var pendingErrorCallback: ((Throwable) -> Unit)? = null
 
@@ -78,6 +82,9 @@ class Camera2Controller(private val context: Context) {
             }
 
             characteristics = cameraManager!!.getCameraCharacteristics(cameraId!!)
+
+            // Init HdrCapture
+            hdrCapture = HdrCapture(context, characteristics!!)
 
             startBackgroundThread()
 
@@ -161,6 +168,13 @@ class Camera2Controller(private val context: Context) {
 
             imageReader!!.setOnImageAvailableListener({ reader ->
                 val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+
+                // Mode HDR: listener di-handle oleh HdrCapture
+                if (hdrEnabled) {
+                    image.close()
+                    return@setOnImageAvailableListener
+                }
+
                 try {
                     val uri = saveImage(image)
                     if (uri != null) {
@@ -373,7 +387,6 @@ class Camera2Controller(private val context: Context) {
             val sensorW = sensorRect.width()
             val sensorH = sensorRect.height()
 
-            // Konversi view -> sensor
             val sensorX = ((viewX / viewWidth) * sensorW).toInt()
             val sensorY = ((viewY / viewHeight) * sensorH).toInt()
 
@@ -415,6 +428,14 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    // === HDR ===
+    fun setHdrEnabled(enabled: Boolean) {
+        hdrEnabled = enabled
+        Log.d(TAG, "HDR: $enabled")
+    }
+
+    fun isHdrEnabled(): Boolean = hdrEnabled
+
     // === TAKE PHOTO ===
     fun takePhoto(onSaved: (Uri) -> Unit, onError: (Throwable) -> Unit) {
         val device = cameraDevice
@@ -426,6 +447,23 @@ class Camera2Controller(private val context: Context) {
             return
         }
 
+        // === MODE HDR: ambil 3 frame ===
+        if (hdrEnabled && hdrCapture != null) {
+            Log.d(TAG, "HDR mode: capturing 3 frames")
+
+            hdrCapture!!.capture(
+                device = device,
+                session = session,
+                reader = reader,
+                baseSettings = currentSettings,
+                handler = backgroundHandler!!,
+                onDone = onSaved,
+                onError = onError
+            )
+            return
+        }
+
+        // === MODE NORMAL: 1 frame ===
         pendingSavedCallback = onSaved
         pendingErrorCallback = onError
 
@@ -448,7 +486,7 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
-    // === SAVE IMAGE ===
+    // === SAVE IMAGE (mode normal) ===
     private fun saveImage(image: android.media.Image): Uri? {
         return try {
             val buffer = image.planes[0].buffer
