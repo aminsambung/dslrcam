@@ -308,7 +308,7 @@ fun CameraScreen(
                     currentFilterId = viewModel.currentFilter.id,
                     currentStrength = viewModel.filterStrength,
                     onSelect = { id -> viewModel.setFilter(id) },
-                    onStrengthChange = { strength -> viewModel.setFilterStrength(strength) },
+                    onStrengthChange = { strength -> viewModel.updateFilterStrength(strength) },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 140.dp)
