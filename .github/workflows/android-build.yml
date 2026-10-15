@@ -5,7 +5,10 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch: # tombol manual di GitHub
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -19,36 +22,38 @@ jobs:
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
-        with:
-          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
-      # FIX: beri izin eksekusi ke gradlew
-      - name: Grant execute permission for gradlew
+      - name: Grant execute permission
         run: chmod +x gradlew
 
-      # 1. BUILD DEBUG APK (siap install di HP)
+      - name: Check Gradle
+        run: ./gradlew --version
+
       - name: Build Debug APK
-        run: sh gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug --refresh-dependencies --stacktrace
 
       - name: Upload Debug APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: dslrcam-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
           retention-days: 14
 
-      # 2. BUILD RELEASE APK (belum ditandatangani)
-      - name: Build Release APK (Unsigned)
-        run: sh gradlew assembleRelease --stacktrace
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --stacktrace
 
       - name: Upload Release APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: dslrcam-release-unsigned-${{ github.sha }}
           path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
           retention-days: 14
