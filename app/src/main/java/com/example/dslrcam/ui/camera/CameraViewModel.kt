@@ -33,7 +33,6 @@ class CameraViewModel : ViewModel() {
     var filterStrength by mutableStateOf(1f)
         private set
 
-    /** Mode HDR: gabung 3 frame */
     var hdrEnabled by mutableStateOf(false)
         private set
 
@@ -70,11 +69,10 @@ class CameraViewModel : ViewModel() {
         filterStrength = 1f
     }
 
-    fun setFilterStrength(strength: Float) {
+    fun updateFilterStrength(strength: Float) {
         filterStrength = strength.coerceIn(0f, 1f)
     }
 
-    /** Toggle HDR on/off */
     fun toggleHdr() {
         hdrEnabled = !hdrEnabled
         controller?.setHdrEnabled(hdrEnabled)
