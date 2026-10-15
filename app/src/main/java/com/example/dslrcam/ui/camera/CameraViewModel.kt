@@ -30,10 +30,16 @@ class CameraViewModel : ViewModel() {
     var currentFilter by mutableStateOf(PhotoFilters.findById("normal"))
         private set
 
+    var filterStrength by mutableStateOf(1f)
+        private set
+
+    /** Mode HDR: gabung 3 frame */
+    var hdrEnabled by mutableStateOf(false)
+        private set
+
     var lastPhotoUri by mutableStateOf<Uri?>(null)
         private set
 
-    /** Posisi tap-to-focus dalam koordinat PIXEL (bukan dp) */
     var focusPoint by mutableStateOf<Offset?>(null)
         private set
 
@@ -61,9 +67,19 @@ class CameraViewModel : ViewModel() {
 
     fun setFilter(filterId: String) {
         currentFilter = PhotoFilters.findById(filterId)
+        filterStrength = 1f
     }
 
-    /** Simpan titik fokus dalam koordinat pixel */
+    fun setFilterStrength(strength: Float) {
+        filterStrength = strength.coerceIn(0f, 1f)
+    }
+
+    /** Toggle HDR on/off */
+    fun toggleHdr() {
+        hdrEnabled = !hdrEnabled
+        controller?.setHdrEnabled(hdrEnabled)
+    }
+
     fun setFocusPoint(offset: Offset) {
         focusPoint = offset
     }
@@ -99,7 +115,7 @@ class CameraViewModel : ViewModel() {
 
     fun applyFilterToUri(context: Context, uri: Uri) {
         try {
-            if (currentFilter.matrix == null) {
+            if (currentFilter.matrix == null || filterStrength <= 0f) {
                 onPhotoSaved(uri)
                 return
             }
@@ -116,7 +132,11 @@ class CameraViewModel : ViewModel() {
             }
             inputStream.close()
 
-            val filteredFile = ImageProcessor.applyFilterToFile(tempFile, currentFilter)
+            val filteredFile = ImageProcessor.applyFilterToFile(
+                tempFile,
+                currentFilter,
+                filterStrength
+            )
 
             if (filteredFile != null && filteredFile.exists()) {
                 val newUri = MediaStoreHelper.saveToGallery(context, filteredFile)
