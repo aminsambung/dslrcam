@@ -15,19 +15,27 @@ object ImageProcessor {
 
     fun applyFilterToFile(
         sourceFile: File,
-        filter: PhotoFilters.Filter
+        filter: PhotoFilters.Filter,
+        strength: Float = 1f
     ): File? {
         return try {
-            if (filter.matrix == null) {
+            // Strength 0 atau filter normal — tidak perlu proses
+            if (filter.matrix == null || strength <= 0f) {
                 return sourceFile
             }
 
+            // Baca bitmap
             val options = BitmapFactory.Options().apply {
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
             val bitmap = BitmapFactory.decodeFile(sourceFile.absolutePath, options)
                 ?: return null
 
+            // Dapatkan matrix dengan strength
+            val matrix = PhotoFilters.withStrength(filter, strength)
+                ?: return sourceFile
+
+            // Apply filter
             val filtered = Bitmap.createBitmap(
                 bitmap.width,
                 bitmap.height,
@@ -36,10 +44,11 @@ object ImageProcessor {
 
             val canvas = Canvas(filtered)
             val paint = Paint().apply {
-                colorFilter = ColorMatrixColorFilter(filter.matrix)
+                colorFilter = ColorMatrixColorFilter(matrix)
             }
             canvas.drawBitmap(bitmap, 0f, 0f, paint)
 
+            // Simpan ke file baru
             val filteredFile = File(
                 sourceFile.parent,
                 "filtered_${sourceFile.name}"
@@ -52,7 +61,7 @@ object ImageProcessor {
             bitmap.recycle()
             filtered.recycle()
 
-            Log.d(TAG, "Filter applied: ${filter.name}")
+            Log.d(TAG, "Filter applied: ${filter.name} @ ${(strength * 100).toInt()}%")
             filteredFile
 
         } catch (e: Exception) {
